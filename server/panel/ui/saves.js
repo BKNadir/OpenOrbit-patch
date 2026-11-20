@@ -233,10 +233,22 @@ async function seApply(...ops) {
   SE.busy = false; document.body.classList.remove('se-busy');
   if (v && SE.slot) {
     SE.v = v; seRender();
+    seNotes(v.notes);
     if (!v.discarded) return true;
     toast(T('The save changed after it was opened in the editor (the game was played or a backup restored): the old draft was discarded.'), 'info', 7000);
   }
   return false;
+}
+
+// what a batch operation did (save_editor.NOTES): copies of an item, identical items, copy of a ship's setup
+function seNotes(notes) {
+  for (const n of notes || []) {
+    if (n.kind === 'duplicate') toast(!n.made ? T('No free slot: no copy was made.') : n.fitted ? T('{0} copies made, {1} equipped.', n.made, n.fitted)
+      : T('{0} copies added to the inventory.', n.made), n.made ? 'ok' : 'info');
+    else if (n.kind === 'match') toast(T('{0} identical items updated.', n.count), 'ok');
+    else if (n.kind === 'copy_config') toast(T('{0} items copied.', n.copied) + (n.skipped ? ' ' + T('{0} left out: no slot for them, or not compatible with this ship.', n.skipped) : ''),
+      n.skipped ? 'info' : 'ok', 7000);
+  }
 }
 
 // Search box: the editor (all tabs and item tiles) is rebuilt when typing pauses, not on every key; the cursor stays in place
@@ -373,9 +385,26 @@ function seItemMenu(anchor, e, tgt) {
   popMenu(anchor, [
     { label: T('Unequip (to inventory)'), ic: 'download', fn: () => seApply(moveOp(e.id, 'kick', tgt)) },
     seIsEditable(e) ? { label: T('Edit…'), ic: 'edit', fn: () => seEdit(e) } : null,
+    { label: T('Duplicate…'), ic: 'copy', fn: () => seDuplicate(e, tgt) },
+    { label: T('Fill the free slots with copies'), ic: 'wand', fn: () => seApply({ operation: 'duplicate', item: e.id, fill: true, equip: equipTarget(tgt) }) },
     '-',
     { label: T('Unequip and delete'), ic: 'trash', danger: true, fn: () => seApply(moveOp(e.id, 'kick', tgt), { operation: 'delete', items: [e.id] }) },
   ].filter(Boolean));
+}
+
+// copies of an item, identical to it (level, upgrade, random attributes); from a slot they can be equipped next to it (on drones: the next drones too)
+function seDuplicate(e, tgt) {
+  const count = h('input', { class: 'input num', type: 'number', min: 1, max: 500, value: 1 });
+  const equip = tgt ? h('input', { type: 'checkbox', checked: true }) : null;
+  const m = modal({ title: T('Duplicate item'), sub: itemName(e.lootId),
+    body: [h('div', { class: 'se-edit-head' }, itemIcon(e.lootId, 56), h('div', { class: 'small muted' }, T('The copies are identical: same level, upgrade and attributes.'))),
+      field(T('Number of copies'), count),
+      equip ? h('label', { class: 'row small', style: { gap: '8px', marginTop: '10px' } }, equip, T('Equip the copies in the free slots (the rest go to the inventory)')) : null],
+    foot: [btn(T('Cancel'), () => m.close(), 'ghost'), btn(T('Duplicate'), async () => {
+      const n = Math.max(1, Math.min(500, Math.round(+count.value) || 1));
+      m.close();
+      seApply({ operation: 'duplicate', item: e.id, count: n, equip: equip && equip.checked ? equipTarget(tgt) : undefined });
+    }, 'primary', 'copy')] });
 }
 
 // ---- item editing: upgrade level (Assembly), the level of the P.E.T. gear/protocol, the CPU's allowance and random attributes
@@ -448,6 +477,10 @@ function seEdit(e) {
       sections.push(h('div', { class: 'se-edit line' }, h('div', { class: 'lbl' }, T('Stars')), stars));
     }
   }
+  const twins = v.inventory.filter(x => x.lootId === e.lootId && x.id !== e.id).length;
+  const all = twins ? h('input', { type: 'checkbox' }) : null;
+  if (all) sections.push(h('label', { class: 'row small se-edit line', style: { gap: '8px' } }, all,
+    T('Apply to all identical items ({0} more): same level, upgrade and attributes', twins)));
   const m = modal({ title: T('Edit item'), sub: itemName(e.lootId), wide: !!pool,
     body: [h('div', { class: 'se-edit-head' }, itemIcon(e.lootId, 56), h('div', { class: 'small muted' }, T('Changes go to the draft; pressing Save writes them to the save.'))), ...sections],
     foot: [btn(T('Cancel'), () => m.close(), 'ghost'), btn(T('Apply'), async () => {
@@ -465,6 +498,7 @@ function seEdit(e) {
         if (pool.star) o.star = st.star;
         ops.push(o);
       }
+      if (all && all.checked) ops.push({ operation: 'match', item: e.id });
       if (!ops.length) return m.close();
       if (await seApply(...ops)) { m.close(); toast(T('Item updated (in the draft).'), 'ok'); }
     }, 'primary', 'check')] });
@@ -598,6 +632,7 @@ function seHangar(v) {
     SE.config !== g.active_config ? btn(T('Use this config'), () => seApply({ operation: 'config', ship: g.id, config: +SE.config }), 'sm', 'check', { disabled: ro }) : null,
     btn(g.favorite ? T('Remove from favourites') : T('Make favourite'), () => seApply({ operation: 'favorite', ship: g.id, favorite: !g.favorite }), 'sm', 'star', { disabled: ro }),
     btn(T('Transfer…'), () => seTransfer(v, g), 'sm', 'copy', { disabled: ro, title: T("Moves this ship's equipment to another ship.") }),
+    btn(T('Copy to…'), () => seCopyConfig(v, g), 'sm', 'copy', { disabled: ro || v.ships.length < 2, title: T("Copies this ship's equipment to another ship; this ship keeps its own.") }),
     btn(T('Clear'), async () => await confirmBox(T('Empty config {0}?', SE.config), T('Items on the ship, drones and P.E.T. go back to the inventory.'), { ok: T('Clear'), danger: true })
       && seApply({ operation: 'clean_up', ship: g.id, config: +SE.config }), 'sm', 'trash', { disabled: ro }),
     btn(T('Remove'), async () => await confirmBox(T('Remove {0}?', itemName(g.lootId)), T('The ship leaves the hangar; its equipment goes to the inventory. Until you save, Discard undoes it.'),
@@ -617,6 +652,22 @@ function seHangar(v) {
           T('Config {0}', c), c === g.active_config ? ' •' : ''))),
         tools)),
     h('div', { class: 'se-slots' }, g.slots.map(y => seSlotBox(slotName(y), cfg[y], { target: 'ship', slot: y }))));
+}
+
+// copy of the setup: the target gets copies of the items (the source keeps its own); what the target has no slot for is left out
+function seCopyConfig(v, g) {
+  let target = null;
+  const entries = h('div', { class: 'se-ships sar' }, v.ships.filter(x => x.id !== g.id).map(x => h('button', { class: 'se-ship', type: 'button', onclick: ev => {
+    target = x.id; entries.querySelectorAll('.se-ship').forEach(b => b.classList.toggle('on', b === ev.currentTarget)); } },
+  shipImage(x.appearance, 54, companyLower(v.pilot.company)), h('span', { class: 'se-ship-name' }, itemName(x.lootId)))));
+  const drones = h('input', { type: 'checkbox', checked: true }), adapt = h('input', { type: 'checkbox', checked: true });
+  const line = (cb, text) => h('label', { class: 'row small', style: { gap: '8px', marginTop: '10px' } }, cb, text);
+  const m = modal({ title: T('Copy equipment'), wide: true,
+    sub: T('The ship you choose gets copies of both configs of {0}, which keeps its own equipment. On a smaller ship the slots are filled as far as they go; the equipment it has now goes to the inventory.', itemName(g.lootId)),
+    body: [entries, line(drones, T('Also copy the drone and P.E.T. equipment')),
+      line(adapt, T('Adapt unstable modules and Quantum Fluid Cores to the chosen ship (otherwise those that do not fit it are left out)'))],
+    foot: [btn(T('Cancel'), () => m.close(), 'ghost'), btn(T('Copy'), () => { if (!target) return toast(T('Choose a ship.'), 'err'); m.close();
+      seApply({ operation: 'copy_config', ship: g.id, target, drones: drones.checked, adapt: adapt.checked }); }, 'primary', 'copy')] });
 }
 
 function seTransfer(v, g) {
@@ -708,6 +759,7 @@ function seInventory(v) {
     return seItemButton({ class: 'se-inv-item', type: 'button', onclick: ev => !ro && popMenu(ev.currentTarget, [
       e.targets.includes('ship') ? { label: T('Equip on the selected ship ({0}, config {1})', itemName(g.lootId), SE.config), ic: 'download', fn: () => seApply(moveOp(e.id, 'equip', { target: 'ship' })) } : null,
       seIsEditable(e) ? { label: T('Edit…'), ic: 'edit', fn: () => seEdit(e) } : null,
+      { label: T('Duplicate…'), ic: 'copy', fn: () => seDuplicate(e) },
       '-',
       { label: T('Delete one'), ic: 'trash', danger: true, fn: () => seApply({ operation: 'delete', items: [e.id] }) },
       gr.length > 1 ? { label: T('Delete all ({0})', gr.length), ic: 'trash', danger: true, fn: () => seApply({ operation: 'delete', items: gr.map(x => x.id) }) } : null,

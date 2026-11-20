@@ -416,6 +416,10 @@ def appearance(pr, m, original=None):
         for c in list(g['configs'].values()) + [d for per in g['drones'].values() for d in per.values()] + list((g['pet'] or {}).values()):
             for e in c['items'] if 'items' in c else []:
                 e['maximum'] = maximum(e['lootId'])
+        for cfg in g['configs'].values():            # the ship's own slots: config -> slot -> items (the loop above only reaches drones and P.E.T.)
+            for c in cfg.values():
+                for e in c['items']:
+                    e['maximum'] = maximum(e['lootId'])
     drone_list = []
     for x in p.d['drones']:
         info = SHP.DRONES.get(x['lootId'], {})
@@ -697,6 +701,186 @@ def op_import(pr, m, o):
            'HangarShipImportConfigCommand')
 
 
+# ------------------------------------------------------------------ batch tools: copies of items, copy of a ship's setup, identical items
+NOTES = []                       # what a batch operation did, for the panel's message (apply() adds it to the view as 'notes')
+ITEM_STATE = ('item_level', 'upgrade_level', 'unstable', 'particle', 'qfc')        # per-item records (key: item id) that make two items identical
+
+
+def _clone(pr, i):
+    """A new item identical to item i: same lootId, level, upgrade level and random attributes (drawn first if not drawn yet) -> the new id."""
+    import ship_module as GM
+    import particle as PC
+    i = str(int(i))
+    loot = pr.d['items'][i]
+    t = rng_kind(loot)
+    if t == 'module':
+        GM.state(pr, i)
+    elif t == 'pc':
+        PC.ensure(pr, i)
+    new = pr.new_item(loot)
+    for k in ITEM_STATE:
+        rec = pr.d.get(k, {}).get(i)
+        if rec is not None:
+            pr.d.setdefault(k, {})[str(new)] = json.loads(json.dumps(rec))
+    pr.dirty = True
+    return new
+
+
+def _forget(pr, i):
+    pr.d['items'].pop(str(i), None)
+    for k in ITEM_STATE:
+        pr.d.get(k, {}).pop(str(i), None)
+
+
+def op_duplicate(pr, m, o):
+    """Copies of an item (same level, upgrade and random attributes). count: how many (they go to the inventory). With equip ({ship, config,
+    target, drone, set}) the copies are fitted there through the game's own rules; on a drone, when it is full the next drones are tried. With
+    fill, copies are made only while one can still be fitted (count is then the upper limit): every free slot gets one."""
+    i = str(int(o.get('item') or 0))
+    if i not in pr.d['items']:
+        raise ValueError('Item not found.')
+    equip, fill = o.get('equip'), bool(o.get('fill')) and bool(o.get('equip'))
+    n = _int(o.get('count') or (500 if fill else 1), 1, 500)
+    drones = []
+    if equip and equip.get('target') == 'drone':
+        first = int(equip.get('drone') or 0)
+        drones = [first] + [x['uid'] for x in pr.d['drones'] if x['uid'] != first]
+    made = fitted = 0
+    fitting = bool(equip)
+    for _k in range(n):
+        new = _clone(pr, i)
+        made += 1
+        if not fitting:
+            continue
+        ok = False
+        while not ok:
+            try:
+                op_move(pr, m, dict(equip, direction='equip', item=new, **({'drone': drones[0]} if drones else {})))
+                ok = True
+            except ValueError:
+                if len(drones) > 1:
+                    drones.pop(0)                     # this drone is full: the next one
+                    continue
+                break
+        if ok:
+            fitted += 1
+            continue
+        fitting = False                               # no free slot left: the rest stay in the inventory
+        if fill:
+            _forget(pr, new)
+            made -= 1
+            break
+    NOTES.append({'kind': 'duplicate', 'made': made, 'fitted': fitted})
+    pr.sync_equipment()
+    m.apply_stats()
+    pr.dirty = True
+
+
+def op_match(pr, m, o):
+    """Every other item with the same lootId becomes identical to this one: level, upgrade level and random attributes. Where an item can be
+    fitted is left as it is (a module's ships, the ship a QFC is bound to), so nothing that is equipped comes off."""
+    import ship_module as GM
+    import particle as PC
+    i = str(int(o.get('item') or 0))
+    loot = pr.d['items'].get(i)
+    if not loot:
+        raise ValueError('Item not found.')
+    t = rng_kind(loot)
+    key = {'module': 'unstable', 'pc': 'particle', 'qfc': 'qfc'}.get(t)
+    if t == 'module':
+        GM.state(pr, i)
+    elif t == 'pc':
+        PC.ensure(pr, i)
+    src = pr.d.get(key, {}).get(i) if key else None
+    others = [j for j, l in pr.d['items'].items() if l == loot and j != i]
+    for j in others:
+        for k in ('item_level', 'upgrade_level'):
+            v = pr.d.get(k, {}).get(i)
+            if v is None:
+                pr.d.get(k, {}).pop(j, None)
+            else:
+                pr.d.setdefault(k, {})[j] = v
+        if src is not None:
+            old = pr.d.setdefault(key, {}).get(j) or {}
+            rec = json.loads(json.dumps(src))
+            for k in ('ship', 'ships'):
+                if k in old:
+                    rec[k] = old[k]
+            pr.d[key][j] = rec
+    NOTES.append({'kind': 'match', 'count': len(others)})
+    pr.sync_equipment()
+    m.apply_stats()
+    pr.dirty = True
+
+
+def op_copy_config(pr, m, o):
+    """Copy a ship's setup to another ship (the Transfer System moves it, and refuses a target with fewer slots): the target gets copies of the
+    items of both configs, so the source keeps everything. What the target has no slot for is left out, in slot order; the target's old items go to
+    the inventory. drones: also the items and designs on the drones and the P.E.T. equipment (they are fitted per ship). adapt: copies of unstable
+    modules also work on the target ship and copies of Quantum Fluid Cores are bound to it (otherwise those that don't fit the target are left out)."""
+    import shop as SHP
+    import ship_module as GM
+    src, dst = str(o.get('ship')), str(o.get('target'))
+    if src == dst or src not in pr.d['ships'] or dst not in pr.d['ships']:
+        raise ValueError('Choose a ship.')
+    a, b = pr.ship(src), pr.ship(dst)
+    bl = b['lootId']
+    adapt, with_drones = bool(o.get('adapt', True)), bool(o.get('drones', True))
+    items = pr.d['items']
+    cpu = lambda i: 0 if SHP.EX.slot_bonus_of([items[str(i)]]) else 1          # the Slot CPU first: it opens extra slots
+
+    def fits(slot, i):
+        if slot == 'upgrades':
+            return GM.equip_allowed(pr, i, bl) or (adapt and GM.unstable(items[str(i)]) and bl in GM.all_ships())
+        if slot == 'QuantumFluidCore':
+            rec = pr.d.get('qfc', {}).get(str(i))
+            return bool(rec) and (adapt or rec.get('ship') == bl)
+        return True
+
+    plan = {}
+    for c, cfg in a['configs'].items():
+        plan[c] = {}
+        extras = sorted((i for i in cfg.get('extra', []) if str(i) in items), key=cpu)
+        for slot, ids in cfg.items():
+            ids = extras if slot == 'extra' else [i for i in ids if str(i) in items]
+            keep = [i for i in ids if fits(slot, i)]
+            cap = m.capacity(slot, dst, extras=[items[str(i)] for i in extras]) if slot == 'extra' else m.capacity(slot, dst)
+            plan[c][slot] = keep[:max(0, cap)]
+    copies = {}
+
+    def copy(i):
+        if i not in copies:
+            copies[i] = new = _clone(pr, i)
+            loot = items[str(new)]
+            if rng_kind(loot) == 'qfc':
+                pr.d['qfc'][str(new)]['ship'] = bl
+            elif GM.unstable(loot) and not GM.equip_allowed(pr, new, bl):
+                rec = GM.state(pr, new)
+                rec['ships'] = sorted(set(rec.get('ships') or []) | {bl})
+        return copies[i]
+
+    new_cfg = {c: {slot: [copy(i) for i in ids] for slot, ids in plan[c].items()} for c in a['configs']}         # copies first: new_item takes the lock itself
+    side = {}
+    if with_drones:
+        side['drone_config'] = {c: {uid: [copy(i) for i in ids if str(i) in items] for uid, ids in per.items()}
+                                for c, per in a.get('drone_config', {}).items()}
+        side['drone_design'] = {c: {uid: {k: (copy(i) if i and str(i) in items else None) for k, i in kinds.items()} for uid, kinds in per.items()}
+                                for c, per in a.get('drone_design', {}).items()}
+        side['pet_config'] = {c: {slot: [copy(i) for i in ids if str(i) in items] for slot, ids in per.items()}
+                              for c, per in a.get('pet_config', {}).items()}
+    with pr.lock:
+        b['configs'].update(new_cfg)
+        b.update(side)
+        for c in b['configs']:
+            b.setdefault('drone_config', {}).setdefault(c, {})
+    wanted = {i for cfg in a['configs'].values() for ids in cfg.values() for i in ids if str(i) in items}
+    skipped = len(wanted - set(copies))
+    NOTES.append({'kind': 'copy_config', 'copied': len(copies), 'skipped': skipped})
+    pr.sync_equipment()
+    m.apply_stats()
+    pr.dirty = True
+
+
 def op_delete_ship(pr, m, o):
     """Remove the ship from the hangar; the equipment on it goes to the inventory (fitted state is computed from the ships' configs)."""
     sid = str(o.get('ship'))
@@ -925,7 +1109,7 @@ OPS = {'pilot': op_pilot, 'give': op_give, 'carry': op_move, 'delete': op_delete
             'design': op_design, 'favorite': op_favorite, 'clean_up': op_clear, 'import_action': op_import, 'delete_ship': op_delete_ship, 'drone': op_drone,
             'drone_delete': op_delete_drone, 'item_level': op_item_level, 'ammunition': op_ammo, 'ore': op_ore, 'source': op_resource,
             'booster': op_booster, 'pet': op_pet, 'repair': op_repair, 'home_base': op_home_base, 'keybinds': op_keybinds, 'reset': op_reset,
-            'rng': op_rng, 'cpu_charges': op_cpu_charges}
+            'rng': op_rng, 'cpu_charges': op_cpu_charges, 'duplicate': op_duplicate, 'match': op_match, 'copy_config': op_copy_config}
 
 
 def apply(path, ops, original=None):
@@ -937,7 +1121,7 @@ def apply(path, ops, original=None):
         fn(pr, m, o)
     pr.sync_equipment()
     pr.save(force=True)
-    return appearance(*open_save(path), original=_read(original))
+    return dict(appearance(*open_save(path), original=_read(original)), notes=list(NOTES))
 
 
 def _read(path):
