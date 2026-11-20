@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 
 from lang import t as _
 
-REPO = 'kaanumay/OpenOrbit'
+REPO = 'BKNadir/OpenOrbit-patch'                         # this fork (upstream: kaanumay/OpenOrbit)
 BRANCH = 'main'
 API = 'https://api.github.com'
 VERSION_FILE = os.path.join('server', 'surum.txt')        # name kept (the old updater reads it); "$Format:%H %cI$" -> "<commit> <date>" in GitHub's archive
@@ -202,8 +202,9 @@ class Updater:
             return False
 
     def _git_remote(self):
-        """Fetch the latest version from origin -> (local, remote commit). An error if the fetch fails."""
-        self._go_to('fetch', '--quiet', 'origin', BRANCH)
+        """Fetch the latest version from REPO -> (local, remote commit). An error if the fetch fails. REPO's URL rather than 'origin',
+        so that a clone of the original repository also follows this fork."""
+        self._go_to('fetch', '--quiet', 'https://github.com/%s.git' % REPO, BRANCH)
         return self._go_to('rev-parse', 'HEAD'), self._go_to('rev-parse', 'FETCH_HEAD')
 
     # ------------------------------------------------------------ check
