@@ -3401,5 +3401,12 @@
 "None in the inventory.": "Aucun dans l'inventaire.",
 "Or pick any of them from the catalog.": "Ou choisis-en un dans le catalogue.",
 "From the catalog…": "Depuis le catalogue…",
-"Drone looks": "Apparences de drone"
+"Drone looks": "Apparences de drone",
+"Configs {0}": "Configs {0}",
+"Equip on both configs": "Équiper sur les deux configs",
+"Each item is equipped in config 1 and config 2 of {0} (as in the game, the same item can be in both).": "Chaque objet est équipé dans la config 1 et la config 2 du {0} (comme en jeu, un même objet peut être dans les deux).",
+"Right-click: equip on config {0}": "Clic droit : équiper sur la config {0}",
+"Unequip from config {0}": "Retirer de la config {0}",
+"All items, with where they are equipped.": "Tous les objets, avec l'endroit où ils sont équipés.",
+"Items you can still equip in config {0}: free ones, and those only in config {1} (badge).": "Objets encore équipables dans la config {0} : les libres, et ceux qui ne sont que dans la config {1} (badge)."
 }
