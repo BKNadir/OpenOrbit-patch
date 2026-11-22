@@ -417,13 +417,14 @@ class Quests:
         return 'no_route' if st == 'here' else st          # the base map has no quest giver either
 
     def accept_quest(self):
-        """At a quest giver: the highest-level starter / main quest the bot can play from start to end, not against the clock, that can
-        be taken now (level, previous quests, a free slot: quest.Quests.accept checks them) -> its id or None."""
+        """At a quest giver: the lowest-level starter / main quest the bot can play from start to end, not against the clock, that can
+        be taken now (level, previous quests, a free slot: quest.Quests.accept checks them) -> its id or None. Lowest first (fork): the bot
+        works its way up the quest levels instead of jumping to the hardest one it may take."""
         q, w = self.quest_book(), self.w
         if q is None or not w.near_giver or not q.free_slots():
             return None
         offer = QU.offered()
-        cands = sorted((-d.get('level', 0), qid) for qid, d in QU.QUESTS.items() if d.get('kinds') in ACCEPT_KINDS and not d.get('duration_sec'))
+        cands = sorted((d.get('level', 0), qid) for qid, d in QU.QUESTS.items() if d.get('kinds') in ACCEPT_KINDS and not d.get('duration_sec'))
         for _, qid in cands:
             if q.status(qid)[0] != QU.NOT_STARTED or not q.visible(qid, offer) or not self.playable(qid):
                 continue
