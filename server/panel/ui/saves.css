@@ -403,3 +403,9 @@ body.se-busy .se-main { opacity: .75; transition: opacity .2s .15s; pointer-even
   margin-top: 12px; border-color: rgba(64, 223, 255, .45); background: rgba(6, 14, 28, .96); box-shadow: 0 6px 24px rgba(0, 0, 0, .5); }
 .se-selbar-count { display: grid; gap: 2px; }
 .se-where.here { color: var(--accent); }
+.se-admin-row { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 4px; }
+.se-admin-row > .grow { flex: 1 1 260px; min-width: 0; }
+.se-admin-row > .switch, .se-admin-row > .seg { flex: none; }
+.se-admin-row.lead { border-color: rgba(64, 223, 255, .45); }
+.se-admin-row.off { opacity: .5; }
+.se-admin { display: grid; gap: 10px; align-content: start; }

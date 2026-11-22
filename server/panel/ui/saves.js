@@ -97,7 +97,7 @@ function saveMenu(k, ev) {
   ].filter(Boolean));
 }
 const statusBadges = k => [k.in_use ? badge(T('IN GAME'), 'ok') : null, k.draft ? badge(T('UNSAVED CHANGES'), 'warn') : null,
-  k.corrupt ? badge(T('CORRUPT'), 'err') : null];
+  k.corrupt ? badge(T('CORRUPT'), 'err') : null, k.admin ? badge(T('ADMIN'), 'info') : null];
 
 // active save: wide scene (ship, company portrait, level, wallet, actions)
 function saveScene(k) {
@@ -639,7 +639,28 @@ function sePilot(v) {
     seCard(T('Account'), 'info', h('div', { class: 'kv' },
       h('div', null, T('Clan'), h('b', null, p.clan ? '[' + p.clan + ']' : '—')), h('div', null, T('Rank'), h('b', null, p.rank ?? '—')),
       h('div', null, T('Play time'), h('b', null, fmtDur(p.play_sec))), h('div', null, T('Created'), h('b', null, fmtWhen(p.created))),
-      h('div', null, T('Uridium bank'), h('b', null, fmtN(p.bank))), h('div', null, T('Quests'), h('b', null, T('{0} taken · {1} completed', v.quests.active, v.quests.done))))));
+      h('div', null, T('Uridium bank'), h('b', null, fmtN(p.bank))), h('div', null, T('Quests'), h('b', null, T('{0} taken · {1} completed', v.quests.active, v.quests.done))))),
+    seAdminCard());
+}
+
+// the save's admin settings (settings.py 'manager' group, kept in the save's settings.json): saved at once, not part of the editor's draft
+function seAdminCard() {
+  const slot = SE.slot, box = h('div', { class: 'se-admin' }, h('div', { class: 'small muted' }, T('Loading…')));
+  const draw = r => {
+    if (!r || SE.slot !== slot) return;
+    const on = !!r.values.admin_mode;
+    const set = (key, x) => act(() => api('/api/saves/admin', { id: slot, values: { [key]: x } })).then(n => { if (n) { draw(n); toast(T('Saved.'), 'ok'); } });
+    box.replaceChildren(...r.schema.map(s => {
+      const v = r.values[s.key];
+      const ctl = s.type === 'bool' ? h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: !!v, onchange: e => set(s.key, e.target.checked) }), h('span'))
+        : h('div', { class: 'seg' }, (s.options || []).map((name, i) => h('button', { class: i === v ? 'on info' : '', type: 'button', onclick: () => i !== v && set(s.key, i) }, name)));
+      return h('div', { class: 'se-admin-row' + (s.key !== 'admin_mode' && !on ? ' off' : '') + (s.key === 'admin_mode' ? ' lead' : '') },
+        h('div', { class: 'grow' }, h('b', null, s.name), h('div', { class: 'small muted' }, s.description)), ctl);
+    }), h('div', { class: 'small dim' }, r.in_use ? T('The game is running with this save: most of these apply at the next login.')
+      : T("Saved right away (not part of the editor's changes); they apply when you play this save.")));
+  };
+  api('/api/saves/admin?id=' + encodeURIComponent(slot)).then(draw).catch(e => box.replaceChildren(h('div', { class: 'small muted' }, String(e.message || e))));
+  return seCard(T('Admin'), 'shield', h('p', { class: 'desc' }, T('Whether this save plays as an administrator in the game. Each save has its own setting.')), box);
 }
 
 function seHangar(v) {
