@@ -100,10 +100,14 @@ def goal(pilot, s, now):
         pilot.note('Quest handed in: {0}.', g['name'])
         pilot.quest_block = now + HANDED_SEC
     else:
-        qid = act.accept_quest()
-        if qid:
+        taken = []
+        for _ in range(c['accept_count']):          # several at once (fork): the lowest levels first, within the free quest slots
+            qid = act.accept_quest()
+            if not qid:
+                break
+            taken.append(qid)
             pilot.note('Quest taken: {0}.', act.quest_name(qid))
-        else:
+        if not taken:
             pilot.note('No quest to take here.')
             pilot.quest_block = now + BLOCK_SEC
             pilot.mode_end('no_quest')

@@ -1188,6 +1188,7 @@ PILC.push({ id: 'quests', tab: 'mode:quest', order: 10, build: () => {
     (PIL.cat.quests || []).length ? null : h('p', { class: 'muted small' }, T('No accepted quest: take one in the game (or let the bot take one below).')),
     chosen ? h('p', { class: 'muted small' }, T('Only this quest is played; no other quest is taken.'))
       : pilCheck('quests.accept', T('Take a new quest at a quest giver when none can be played (lowest level first, then up)')),
+    chosen ? null : pilFields(field(T('Quests to take at once'), pilNum('quests.accept_count', 1, 20))),
     h('p', { class: 'desc', style: { marginTop: '12px' } }, chosen ? T('When this quest is done or cannot be played:') : T('When no quest can be played nor taken:')),
     pilThen('quests', 'quest'));
 } });

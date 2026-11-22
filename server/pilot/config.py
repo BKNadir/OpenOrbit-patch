@@ -182,6 +182,7 @@ BLOCKS = {
     'quests': {                                    # Quests mode: the active quests lead the hunt
         'qid': ('int', 0, 0, 10 ** 9),             # the quest to play (one of the accepted ones); 0: the first one that can be played
         'accept': ('bool', False),                 # take a new quest at a quest giver when none can be played
+        'accept_count': ('int', 1, 1, 20),         # fork: how many quests to take at once at the giver (within the free quest slots)
         'then': ('choice', 'hunt', THEN),          # no quest to play or to take
     },
     'gates': {                                     # Galaxy gate mode: a galaxy gate end to end
