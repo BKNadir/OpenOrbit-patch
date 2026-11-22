@@ -2625,7 +2625,7 @@ async function renderSkylab() {
           && skylabAction(m.id, 'abortUpgrade'), 'sm'));
     } else if (c) {
       buttons.push(btn(rate ? T('Build') : T('Upgrade'), () => skylabAction(m.id, 'upgrade'), 'sm primary'));
-      buttons.push(btn(c.uridium ? T('Instant ({0} U.)', fmtN(c.uridium)) : T('Instant (free)'), () => skylabAction(m.id, 'instantUpgrade'), 'sm'));
+      buttons.push(btn(c.uridium ? T('Instant ({0} U.)', fmtN(c.uridium)) : T('Instant'), () => skylabAction(m.id, 'instantUpgrade'), 'sm'));
     }
     // quick upgrade: instant levels one after the other up to the highest (a running upgrade is finished first)
     if (m.level < m.maximum && (c || m.remaining != null)) buttons.push(btn(T('Max level'), () => skylabMax(m.id, skModuleName(m.id)), 'sm', 'zap',
