@@ -3435,5 +3435,7 @@
 "Auto Mode is on for {0}: it starts flying when this save plays.": "Le mode automatique est activé pour {0} : il se met à piloter dès que cette sauvegarde joue.",
 "Auto Mode is off for {0}.": "Le mode automatique est désactivé pour {0}.",
 "Take a new quest at a quest giver when none can be played (lowest level first, then up)": "Prendre une nouvelle quête chez un donneur de quêtes quand aucune ne peut être jouée (le niveau le plus bas d'abord, puis en montant)",
-"Attack them": "Les attaquer"
+"Attack them": "Les attaquer",
+"Clans without member limit": "Clans sans limite de membres",
+"A clan can have any number of members (yours and the bot clans). When off, at most 50 members per clan, as in the game.": "Un clan peut avoir autant de membres que voulu (le tien et ceux des bots). Désactivé : 50 membres au maximum par clan, comme dans le jeu."
 }

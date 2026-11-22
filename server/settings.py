@@ -178,6 +178,8 @@ SCHEMA = [
                                                       "real game only at the station). When off, only at the station.", default=True),
     _b('clan_cooldown', 'Clan 48-hour rules', 'world', 'After leaving a clan you cannot found or join another clan for 48 hours; the clan name/tag can only '
                                                        'be changed every 48 hours. When off there is no waiting time.', default=True),
+    _b('clan_unlimited', 'Clans without member limit', 'world', 'A clan can have any number of members (yours and the bot clans). When off, '
+                                                                'at most 50 members per clan, as in the game.', default=True),
     # ---------------------------------------------------------------- gates and modes
     _c('gate_part', 'Gate part chance', 'gate', "Chance of getting a gate part per energy in the Galaxy Gate generator (the game's value is 13%; the "
                                                 "window's odds list changes too).", lo=0.1, hi=7.0, limit=1000.0),
