@@ -1269,7 +1269,8 @@ PILC.push({ id: 'players', tab: 'safety', order: 30, build: () => pilCard('users
   T('Players of another company (friend server) and player bots: what to do when one comes close or fires at your ship.'),
   pilCheck('players.enabled', T('Watch for enemy pilots')),
   pilFields(
-    field(T('Reaction'), pilSelect('players.action', [['flee', T('Hide in a safe zone')], ['map', T("Go to another of the mode's maps")], ['stop', T('Stop')]])),
+    field(T('Reaction'), pilSelect('players.action', [['flee', T('Hide in a safe zone')], ['map', T("Go to another of the mode's maps")], ['stop', T('Stop')],
+      ['fight', T('Attack them')]])),
     field(T('Distance'), pilNum('players.distance', 0, 20000, 100)),
     field(T('Stay hidden (s)'), pilNum('players.wait_sec', 0, 3600, 10)),
     field(T('Avoid the map (min)'), pilNum('players.avoid_min', 1, 1440))),

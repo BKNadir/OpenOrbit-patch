@@ -3434,5 +3434,6 @@
 "Auto Mode off: click to turn it on": "Mode automatique désactivé : clique pour l'activer",
 "Auto Mode is on for {0}: it starts flying when this save plays.": "Le mode automatique est activé pour {0} : il se met à piloter dès que cette sauvegarde joue.",
 "Auto Mode is off for {0}.": "Le mode automatique est désactivé pour {0}.",
-"Take a new quest at a quest giver when none can be played (lowest level first, then up)": "Prendre une nouvelle quête chez un donneur de quêtes quand aucune ne peut être jouée (le niveau le plus bas d'abord, puis en montant)"
+"Take a new quest at a quest giver when none can be played (lowest level first, then up)": "Prendre une nouvelle quête chez un donneur de quêtes quand aucune ne peut être jouée (le niveau le plus bas d'abord, puis en montant)",
+"Attack them": "Les attaquer"
 }

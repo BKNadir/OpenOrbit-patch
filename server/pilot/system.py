@@ -81,6 +81,7 @@ class Pilot:
         self.support_at, self.config_at, self.pet_at = 0.0, 0.0, 0.0
         self.sell_block, self.supply_at, self.supply_fail = 0.0, 0.0, {}
         self.danger_until = 0.0         # enemy pilots seen: hidden until then
+        self.fight_until = 0.0          # enemy pilots seen with the 'fight' reaction: they are the targets until then (tasks/players.py)
         self.no_shelter = None          # the map already noted as having no safe zone to hide in
         self.ended = set()              # the modes that ended in this run (a 'then' back to one of them stops the bot: no ping-pong)
         self.quests_finished = set()    # the quests completed in this run (the 'quest' event)
@@ -343,6 +344,9 @@ class Pilot:
                 out.update(defend=False, clear_path=False, rockets=False, launcher=False)
             if g['kind'] == 'die':                  # a quest that wants the ship destroyed: no flight, no fight back
                 out.update(flee_hp=0, resume_hp=5, defend=False, clear_path=False)
+        pl = self.cfg['players']
+        if pl['enabled'] and pl['action'] == 'fight' and now < self.fight_until and out.get('pvp') is None:
+            out['pvp'] = ()                         # enemy pilots near: the enemy player bots are the targets (act/players.pvp_targets)
         return out
 
     def safety(self, s, cfg, now):

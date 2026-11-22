@@ -3,7 +3,10 @@ the ship), the chosen reaction:
   flee  hide in the nearest safe zone (station, portal) until none has been seen for wait_sec; on a map with no safe zone for the player
         (another company's maps, like an enemy X-5) the bot carries on with its task (it fights back if attacked);
   map   avoid this map for avoid_min minutes and go to another of the mode's maps (no other map: flee);
-  stop  stop the bot (where the ship is, or at the base with go_home)."""
+  stop  stop the bot (where the ship is, or at the base with go_home);
+  fight (fork) attack them: the enemy player bots become the targets (hunt_cfg pvp: act/players.pvp_targets, the game's own PvP rules)
+        until none has been seen for wait_sec; the aliens wait meanwhile. Low HP still flees (safety). Players on a shared map (friend
+        server) are not targeted: the bot only fights back against them."""
 from .. import brain as B
 from . import travel as TRAVEL
 
@@ -22,6 +25,9 @@ def run(pilot, s, now):
             pilot.note('Enemy pilot nearby: {0}.', ', '.join(sorted({o['name'] or '?' for o in near})))
         pilot.danger_until = now + c['wait_sec']
         action = c['action']
+        if action == 'fight':
+            pilot.fight_until = now + max(5, c['wait_sec'])
+            return None
         if action == 'stop':
             pilot.stop('players')
             return 'hide'
@@ -34,7 +40,7 @@ def run(pilot, s, now):
                     pilot.note('Leaving the map for {0}.', pilot.act.map_name(pilot.hunt_map))
                 return None                         # the travel errand takes the ship away
         return hide(pilot, s, now)
-    if now < pilot.danger_until and c['action'] != 'map':
+    if now < pilot.danger_until and c['action'] not in ('map', 'fight'):
         return hide(pilot, s, now)
     return None
 

@@ -175,7 +175,7 @@ BLOCKS = {
         'enabled': ('bool', False),
         'distance': ('int', 2000, 0, 20000),
         'attack_only': ('bool', False),            # react only when one fires at the ship
-        'action': ('choice', 'flee', ('flee', 'map', 'stop')),
+        'action': ('choice', 'flee', ('flee', 'map', 'stop', 'fight')),     # fight (fork): attack them (act/players.pvp_targets)
         'wait_sec': ('int', 60, 0, 3600),          # flee: stay hidden this long after the last sighting
         'avoid_min': ('int', 10, 1, 1440),         # map: avoid the map this long
     },
