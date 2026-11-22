@@ -343,17 +343,43 @@ class Quests:
                     continue
                 g = self.cond_goal(c, vals.get(str(c['id']), 0), forbid)
                 if g is not None:
-                    (giver if g['kind'] == 'giver' else mine).append(dict(g, qid=qid, cid=c['id'], name=d.get('name', str(qid))))
+                    (giver if g['kind'] == 'giver' else mine).append(dict(g, qid=qid, cid=c['id'], name=d.get('name', str(qid)),
+                                                                          timed=left((qid, d, vals)) != math.inf))
             out += mine or giver
         return out
 
+    @staticmethod
+    def serves(g, o):
+        """Whether playing goal g also moves goal o on (fork: several quests at once). Aliens: g's kills count for o when they share a map
+        (or either is anywhere) and an alien type, or when o takes any alien (grind). Other goals: the same objective (kind, maps, aliens,
+        ore, box, point)."""
+        if g['kind'] in ('kill', 'grind') and o['kind'] in ('kill', 'grind'):
+            gm, om = set(g['maps'] or ()), set(o['maps'] or ())
+            if gm and om and not gm & om:
+                return False
+            if o['kind'] == 'grind':
+                return True
+            return g['kind'] == 'kill' and bool(set(g['aliens'] or ()) & set(o['aliens'] or ()))
+        same = lambda x: (x['kind'], tuple(x['maps'] or ()), tuple(sorted(x['aliens'] or ())), x.get('ore'), x.get('box'),
+                          tuple(x['point']) if x.get('point') else None)
+        return same(g) == same(o)
+
     def quest_goal(self, only=None, now=None, skip=()):
-        """The goal to play now (quest_goals' first) with the aliens of every open kill condition on its maps (map -> types: one trip
-        clears all of them), or None."""
+        """The goal to play now with the aliens of every open kill condition on its maps (map -> types: one trip clears all of them), or
+        None. Which goal (fork): a quest against the clock first; otherwise the goal that moves the most quests on at once (several quests
+        with the same objective are played together), ties in quest_goals' order; its maps where the most of those quests count first."""
         goals = self.quest_goals(only, now, skip)
         if not goals:
             return None
-        g = dict(goals[0])
+        if goals[0].get('timed') or len(goals) == 1:
+            g = dict(goals[0])
+        else:
+            def reach(x):
+                return len({o['qid'] for o in goals if o is x or self.serves(x, o)})
+            g = dict(max(goals, key=lambda x: (reach(x), -goals.index(x))))
+        if g['kind'] in ('kill', 'grind') and g['maps'] and len(g['maps']) > 1:
+            count = {m: sum(1 for o in goals if self.serves(g, o) and (not o['maps'] or m in o['maps'])) for m in g['maps']}
+            g['maps'] = sorted(g['maps'], key=lambda m: -count[m])
         if g['kind'] == 'kill':
             by_map = {}
             for o in goals:
