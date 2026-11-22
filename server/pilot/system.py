@@ -81,6 +81,7 @@ class Pilot:
         self.support_at, self.config_at, self.pet_at = 0.0, 0.0, 0.0
         self.sell_block, self.supply_at, self.supply_fail = 0.0, 0.0, {}
         self.danger_until = 0.0         # enemy pilots seen: hidden until then
+        self.roam_seen = {}             # map -> {patrol cell: last time the ship was there} (brain.roam_point: the patrol covers the map)
         self.fight_until = 0.0          # enemy pilots seen with the 'fight' reaction: they are the targets until then (tasks/players.py)
         self.no_shelter = None          # the map already noted as having no safe zone to hide in
         self.ended = set()              # the modes that ended in this run (a 'then' back to one of them stops the bot: no ping-pong)
@@ -287,6 +288,7 @@ class Pilot:
             return
         hunt = self.hunt_cfg(now)
         s = act.snapshot(now, hunt)
+        self.roam_seen.setdefault(s['map'], {})[B.roam_cell(*s['hero'])] = now      # where the ship has been (the patrol goes elsewhere)
         hp = B.hp_pct(s)
         SUPPORT.run(self, s, now)                   # abilities, technologies, config, P.E.T. (uses the last step's target)
         ECON.supply(self, now)                      # ammo resupply
@@ -504,7 +506,7 @@ class Pilot:
             return
         if cfg['roam'] and MODES.allows(self, 'roam'):
             if self.mode != 'roam' or not act.flying(now):
-                p = B.roam_point(s, cfg)
+                p = B.roam_point(s, cfg, visited=self.roam_seen.setdefault(s['map'], {}), now=now)
                 if p:
                     act.move_to(p[0], p[1], now)
             self.mode = 'roam'
