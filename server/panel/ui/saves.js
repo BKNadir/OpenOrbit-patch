@@ -255,6 +255,7 @@ function seNotes(notes) {
     else if (n.kind === 'remove') toast(T('{0} items deleted.', n.count), n.count ? 'ok' : 'info');
     else if (n.kind === 'replace') toast(T('{0} items replaced.', n.count) + (n.refused ? ' ' + T("{0} couldn't be equipped in their old place: they are in the inventory.", n.refused) : ''),
       n.refused ? 'info' : 'ok', 7000);
+    else if (n.kind === 'design_all') toast(T('{0} of {1} drones done.', n.done, n.drones) + (n.made ? ' ' + T('{0} added from the catalog.', n.made) : ''), n.done ? 'ok' : 'info');
     else if (n.kind === 'level_many') toast(T('{0} items changed.', n.count), n.count ? 'ok' : 'info');
   }
 }
@@ -534,13 +535,14 @@ function groupItems(entries) {
   return Object.values(gr).sort((a, b) => itemName(a[0].lootId).localeCompare(itemName(b[0].lootId)));
 }
 // put in an empty slot: those in the inventory that fit, or give from the catalog and put in
+const SE_DESIGN_SLOTS = ['design', 'visual'];          // a drone's two design slots: with bonuses, look only
 function sePickEquip(tgt) {
   const v = SE.v;
   const eligible = v.inventory.filter(e => seIsUsable(e) && (tgt.target === 'ship' ? e.targets.includes('ship') && e.slot === tgt.slot
-    : tgt.target === 'drone' ? e.targets.includes('drone') && (tgt.slot === 'design') === (e.slot === 'design')
+    : tgt.target === 'drone' ? e.targets.includes('drone') && (SE_DESIGN_SLOTS.includes(tgt.slot) ? e.slot === tgt.slot : !SE_DESIGN_SLOTS.includes(e.slot))
       : e.targets.includes('pet') && (tgt.slot === 'heat' ? e.heat : e.pet_slot === tgt.slot)))
     .sort((a, b) => seIsEquipped(b) - seIsEquipped(a));          // items of the other config first: free copies stay free
-  const title = tgt.target === 'drone' ? (tgt.slot === 'design' ? T('Drone design') : T('Drone equipment')) : slotName(tgt.slot);
+  const title = tgt.target === 'drone' ? (tgt.slot === 'design' ? T('Drone design') : tgt.slot === 'visual' ? T('Drone look') : T('Drone equipment')) : slotName(tgt.slot);
   const m = modal({ title: T('{0}: equip an item', title), wide: true, body: [
     eligible.length ? h('div', { class: 'se-selection' }, groupItems(eligible).map(gr => seItemButton({ class: 'se-selection-item', type: 'button',
       onclick: () => { m.close(); seApply(moveOp(gr[0].id, 'equip', tgt)); } }, gr[0], itemIcon(gr[0].lootId, 56), ...lvlBadge(gr[0]),
@@ -555,10 +557,12 @@ function sePickEquip(tgt) {
 async function seCatalog(o = {}) {
   if (!SE.catalog) { const r = await act(() => api('/api/editor/catalog')); if (!r) return; SE.catalog = r; }
   let entries = SE.catalog.items;
-  if (o.equip) entries = entries.filter(([, , gy, py, dr]) => o.equip.target === 'ship' ? gy === o.equip.slot
-    : o.equip.target === 'pet' ? (o.equip.slot === 'heat' ? py === 'lasers' || py === 'generators' : py === o.equip.slot) : dr && (o.equip.slot === 'design') === (gy === null && !py));
+  if (o.equip) entries = entries.filter(([, , gy, py, dr, ds]) => o.equip.target === 'ship' ? gy === o.equip.slot
+    : o.equip.target === 'pet' ? (o.equip.slot === 'heat' ? py === 'lasers' || py === 'generators' : py === o.equip.slot)
+      : dr && (SE_DESIGN_SLOTS.includes(o.equip.slot) ? ds === o.equip.slot : !ds));
   if (o.on) entries = entries.filter(([l]) => l.startsWith(o.on));
-  if (o.pick) entries = entries.filter(([l, , gy, py]) => !/^(ammunition|resource|ship|booster|package|deal)_/.test(l) && (!o.slot || gy === o.slot || py === o.slot));
+  if (o.pick) entries = entries.filter(([l, , gy, py, , ds]) => (ds || !/^(ammunition|resource|ship|drone|booster|package|deal)_/.test(l))
+    && (!o.slot || gy === o.slot || py === o.slot || ds === o.slot));
   const tally = {}; for (const [, k] of entries) tally[k] = (tally[k] || 0) + 1;
   const categories = ['all', ...SE.catalog.categories.filter(k => tally[k])];
   const st = { multiplier: o.multiplier && tally[o.multiplier] ? o.multiplier : categories.length === 2 ? categories[1] : 'all', search: '', sec: null };
@@ -708,7 +712,8 @@ function seDrones(v) {
   const new_ = ['drone_flax', 'drone_iris', 'drone_apis', 'drone_zeus'].map(l => h('button', { class: 'se-drone-add', type: 'button', disabled: ro,
     title: T('Add {0}', itemName(l)), onclick: () => seApply({ operation: 'give', items: [[l, 1]] }) }, droneImage(l, 1, 40), h('span', null, itemName(l)), icon('plus')));
   const card = d => {
-    const c = dcfg[d.id] || { items: [] }, tgt = { target: 'drone', drone: d.id }, tgtDesign = { target: 'drone', drone: d.id, slot: 'design' };
+    const c = dcfg[d.id] || { items: [] }, tgt = { target: 'drone', drone: d.id }, tgtDesign = { target: 'drone', drone: d.id, slot: 'design' },
+      tgtLook = { target: 'drone', drone: d.id, slot: 'visual' };
     const upgradeLabel = h('b', { class: 'se-lv-value sm' }, '+' + d.upgrade);
     return h('div', { class: 'card se-drone' },
       h('div', { class: 'se-drone-image' }, droneImage(d.lootId, d.level, 76)),
@@ -726,14 +731,31 @@ function seDrones(v) {
         h('div', { class: 'se-cells' }, c.items.map(e => seCell(e, tgt)), Array.from({ length: Math.max(0, d.capacity - c.items.length) }, () => seEmptyCell(tgt)),
           h('span', { class: 'se-divider' }),
           c.design ? seCell(c.design, tgtDesign) : seEmptyCell(tgtDesign, 'wand', T('Design slot')),
-          c.appearance ? seCell(c.appearance, tgtDesign) : seEmptyCell(tgtDesign, 'wand', T('Look slot')))));
+          c.appearance ? seCell(c.appearance, tgtLook) : seEmptyCell(tgtLook, 'wand', T('Look slot')))));
   };
   return h('div', { class: 'stack' },
     h('div', { class: 'card se-card' }, h('div', { class: 'row wrap between', style: { gap: '12px' } }, shipPicker(v, g),
       h('span', { class: 'pill' }, icon('drone'), T('Drones'), ' ', h('b', null, v.drones.filter(d => !d.single).length + ' / ' + v.max_drones))),
     h('p', { class: 'desc', style: { margin: '10px 0 8px' } }, T("Equipment lives in the selected ship's selected config (as in the game, every ship has two configs).")),
-    ro ? null : h('div', { class: 'se-drone-extras' }, new_)),
+    ro ? null : h('div', { class: 'se-drone-extras' }, new_),
+    ro || !v.drones.length ? null : h('div', { class: 'row wrap', style: { gap: '8px', marginTop: '12px' } },
+      btn(T('Design on all drones…'), () => seDesignAll(v, 'design'), 'sm', 'wand', { title: T('The same design on every drone of this config.') }),
+      btn(T('Look on all drones…'), () => seDesignAll(v, 'visual'), 'sm', 'wand', { title: T('The same look on every drone of this config.') }))),
     v.drones.length ? h('div', { class: 'se-drones' }, v.drones.map(card)) : h('div', { class: 'card empty' }, icon('drone'), h('div', null, T('No drones.'))));
+}
+
+// the same design (or look) on every drone of the selected ship's config: one from the inventory, or from the catalog
+function seDesignAll(v, slot) {
+  const g = seShip(v), apply = lid => seApply({ operation: 'design_all', lootId: lid, ship: g.id, config: +SE.config });
+  const kinds = groupItems(v.inventory.filter(e => e.slot === slot).map(e => Object.assign({}, e, { upgrade: 0, level: 0, rng: null })));
+  const title = slot === 'design' ? T('Design on all drones') : T('Look on all drones');
+  const m = modal({ title, wide: true, sub: T('{0} drones, config {1}. Free copies are used first; missing ones are added. What was in that slot goes back to the inventory.', v.drones.length, SE.config), body: [
+    kinds.length ? h('div', { class: 'se-selection' }, kinds.map(gr => seItemButton({ class: 'se-selection-item', type: 'button', onclick: () => { m.close(); apply(gr[0].lootId); } },
+      gr[0], itemIcon(gr[0].lootId, 56), h('span', { class: 'name' }, itemName(gr[0].lootId)), h('span', { class: 'se-qty' }, '×' + gr.length))))
+      : h('div', { class: 'empty' }, icon('box'), h('div', null, T('None in the inventory.'))),
+    h('div', { class: 'se-selection-bottom' }, h('span', { class: 'small muted' }, T('Or pick any of them from the catalog.')),
+      btn(T('From the catalog…'), () => { m.close(); seCatalog({ title, slot, pick: apply }); }, 'primary sm', 'plus'))],
+  foot: [btn(T('Close'), () => m.close(), 'ghost')] });
 }
 
 function sePet(v) {
@@ -844,7 +866,7 @@ function seLevelMany(es) {
 // replace the selection with another item, one for one, where they were equipped (catalog filtered to their slot when they share one)
 function seReplace(es) {
   const slots = [...new Set(es.map(e => e.slot))];
-  const slot = slots.length === 1 && !['design', 'other'].includes(slots[0]) ? slots[0] : null;
+  const slot = slots.length === 1 && slots[0] !== 'other' ? slots[0] : null;
   seCatalog({ title: T('Replace {0} items', es.length), slot, pick: async lid => {
     const keep = h('input', { type: 'checkbox', checked: true });
     if (!await confirmBox(T('Replace {0} items with {1}?', es.length, itemName(lid)),
@@ -930,7 +952,7 @@ function seInventory(v) {
         btn(T('Select all shown'), () => { shown.forEach(i => SE.sel.add(i)); seRender(); }, 'sm ghost'),
         btn(T('Invert'), () => { shown.forEach(i => SE.sel.has(i) ? SE.sel.delete(i) : SE.sel.add(i)); seRender(); }, 'sm ghost')) : null),
     kinds.length > 1 ? h('div', { class: 'seg', style: { marginTop: '12px', flexWrap: 'wrap' } }, ['all', ...kinds].map(t => h('button', { class: t === SE.invKind ? 'on info' : '',
-      onclick: () => { SE.invKind = t; seRender(); } }, t === 'all' ? T('All') : t === 'design' ? T('Drone designs') : slotName(t)))) : null),
+      onclick: () => { SE.invKind = t; seRender(); } }, t === 'all' ? T('All') : t === 'design' ? T('Drone designs') : t === 'visual' ? T('Drone looks') : slotName(t)))) : null),
     entries.length ? h('div', { class: 'card se-card' }, h('div', { class: 'se-inv' + (SE.selMode ? ' selecting' : '') }, groups.map(tile)))
       : h('div', { class: 'card empty' }, icon('box'), h('div', null, pool.length ? T('No items match the search.') : T('Inventory is empty: everything is equipped.'))));
 }

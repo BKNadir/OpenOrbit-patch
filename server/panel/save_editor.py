@@ -79,12 +79,19 @@ def category(loot, ist=None):
     return 'other'
 
 
+def _design_slot(l):
+    """A drone design's slot: 'design' (with bonuses) or 'visual' (look only); None if l is not a drone design."""
+    import shop as SHP
+    d = SHP.DESIGNS.get(l)
+    return ((d.get('slot') if isinstance(d, dict) else None) or 'design') if d is not None else None
+
+
 def catalog():
     import shop as SHP
     import pet as PETM
     ist = _ist()
-    return {'items': sorted([l, category(l, ist), SHP.slot_of(l), PETM.slot_for(l), bool(SHP.drone_ok(l) or l in SHP.DESIGNS)]
-                              for l in PA.known_loots()),
+    return {'items': sorted([l, category(l, ist), SHP.slot_of(l), PETM.slot_for(l), bool(SHP.drone_ok(l) or l in SHP.DESIGNS),
+                               _design_slot(l)] for l in PA.known_loots()),
             'categories': [k for k, _s, _o in CATEGORIES] + ['other']}
 
 
@@ -402,13 +409,13 @@ def appearance(pr, m, original=None):
         return h + (['pet'] if PETM.slot_for(l) else [])
     inventory = []
     for i, l in p.d['items'].items():
-        if l.startswith(('drone_', 'ship_')):
+        if l.startswith('ship_') or (l.startswith('drone_') and l not in SHP.DESIGNS):     # ships and drones have their own tabs
             continue
         place = places.get(int(i))                       # equipped items stay listed with their ship and configs (other config can use them)
         if place and not targets(l):
             continue
         e = _item(p, i)
-        e.update(targets=targets(l), slot=SHP.slot_of(l) or PETM.slot_for(l) or ('design' if l in SHP.DESIGNS else 'other'),
+        e.update(targets=targets(l), slot=SHP.slot_of(l) or PETM.slot_for(l) or (_design_slot(l) if l in SHP.DESIGNS else 'other'),
                  pet_slot=PETM.slot_for(l), heat=bool(PETM.heat_slot_ok(l)), maximum=maximum(l),
                  ship=place[0] if place else None, configs=sorted(place[1]) if place else [])
         inventory.append(e)
@@ -1084,12 +1091,13 @@ def op_duplicate_many(pr, m, o):
 def op_trim(pr, m, o):
     """Keep at most 'keep' unfitted items of each kind (lootId; random attributes, upgrade and level do not matter); the extra ones are deleted, the
     lowest upgrade first. lootIds: only these kinds (default: all)."""
+    import shop as SHP
     keep = _int(o.get('keep') or 0, 0, 10 ** 6)
     only = set(o.get('lootIds') or [])
     busy = pr.equipped_ids()
     kinds = {}
     for i, l in pr.d['items'].items():
-        if int(i) in busy or l.startswith(('drone_', 'ship_')) or (only and l not in only):
+        if int(i) in busy or l.startswith('ship_') or (l.startswith('drone_') and l not in SHP.DESIGNS) or (only and l not in only):
             continue
         kinds.setdefault(l, []).append(int(i))
     up = pr.d.get('upgrade_level', {})
@@ -1100,6 +1108,40 @@ def op_trim(pr, m, o):
             _forget(pr, i)
             gone += 1
     NOTES.append({'kind': 'remove', 'count': gone})
+    pr.dirty = True
+
+
+def op_design_all(pr, m, o):
+    """The same drone design (or look) on every drone of a ship's config: free copies of lootId first, new ones when they run out; what was in that
+    slot goes back to the inventory."""
+    loot = str(o.get('lootId') or '')
+    slot = _design_slot(loot)
+    if not slot:
+        raise ValueError('Unknown item: %s', loot)
+    sid = str(o.get('ship') or pr.d['active_ship'])
+    if sid not in pr.d['ships']:
+        raise ValueError('Ship not found.')
+    cid = _int(o.get('config') or pr.ship(sid)['active_config'], 1, 2)
+    base = {'ship': sid, 'config': cid, 'target': 'drone'}
+    made = done = 0
+    for x in pr.d['drones']:
+        cur = pr.drone_design_id(x, slot, cid, sid)
+        if cur and pr.d['items'].get(str(cur)) == loot:
+            continue
+        if cur:
+            op_move(pr, m, dict(base, drone=x['uid'], direction='kick', item=cur))
+        # free copies: equipped nowhere, or only in this ship's other config (an item can be in both configs, as in the game)
+        free = [int(i) for i, l in pr.d['items'].items() if l == loot and all(p['ship'] == sid and p['config'] != cid for p in _places(pr, int(i)))]
+        if not free:
+            free, made = [_grant(pr, m, loot)], made + 1
+        try:
+            op_move(pr, m, dict(base, drone=x['uid'], direction='equip', item=free[0]))
+            done += 1
+        except ValueError:
+            pass
+    NOTES.append({'kind': 'design_all', 'done': done, 'made': made, 'drones': len(pr.d['drones'])})
+    pr.sync_equipment()
+    m.apply_stats()
     pr.dirty = True
 
 
@@ -1333,7 +1375,7 @@ OPS = {'pilot': op_pilot, 'give': op_give, 'carry': op_move, 'delete': op_delete
             'booster': op_booster, 'pet': op_pet, 'repair': op_repair, 'home_base': op_home_base, 'keybinds': op_keybinds, 'reset': op_reset,
             'rng': op_rng, 'cpu_charges': op_cpu_charges, 'duplicate': op_duplicate, 'match': op_match, 'copy_config': op_copy_config,
             'equip_many': op_equip_many, 'unequip_many': op_unequip_many, 'remove': op_remove, 'replace': op_replace, 'level_many': op_level_many,
-            'duplicate_many': op_duplicate_many, 'trim': op_trim}
+            'duplicate_many': op_duplicate_many, 'trim': op_trim, 'design_all': op_design_all}
 
 
 def apply(path, ops, original=None):
