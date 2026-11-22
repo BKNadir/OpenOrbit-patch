@@ -26,7 +26,6 @@ When the panel's "GM console" setting (gm_console, developer) is on, dailyRank 6
 """
 import json, math, os, random, time
 
-import settings as SET
 from legacy_protocol import legacy
 
 REQUESTS = ('CCInitRequest', 'CCommandRequest')
@@ -38,7 +37,8 @@ STAND_IN = '79'                                          # values of an NPC that
 
 def enabled(profile=None):
     """On a friend server only the server's own player (off for a guest even if the server's setting is on)."""
-    return bool(SET.get('gm_console')) and getattr(profile, 'guest', None) is None
+    import admin_mode as YM
+    return bool(YM._setting(profile, 'gm_console'))          # the player's own save (admin_mode._setting; never a friend-server guest)
 
 
 def mod(_cls, **f):
