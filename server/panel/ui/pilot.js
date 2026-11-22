@@ -25,7 +25,35 @@ PAGES.push({ id: 'pilot', name: N('Auto Mode'), ic: 'bot', game: true, beta: tru
 GAME_PAGES.push(['pilot', N('Auto Mode'), '', 'bot']);
 RENDER.pilot = () => renderPilot();
 
-const PIL = { data: null, cat: {}, tab: null, seq: 0, timer: null, polling: false, aliensSig: '', alienNames: {}, els: null, journal: 0 };
+const PIL = { data: null, cat: {}, tab: null, seq: 0, timer: null, polling: false, aliensSig: '', alienNames: {}, els: null, journal: 0, slot: null, saves: [], savesAt: 0 };
+// every request names the save whose Auto Mode the page shows (pilot_panel.py: each save has its own pilot.json and its own bot)
+const pilApi = (path, body) => body ? api(path, Object.assign({ slot: PIL.slot }, body)) : api(path + '?slot=' + encodeURIComponent(PIL.slot || ''));
+
+// the saves' strip: every save with its Auto Mode switch (one click, any save) and whether its pilot is in the game; clicking a save shows its page
+function pilSavesStrip() {
+  if (PIL.saves.length < 2 && PIL.saves.every(k => k.id === PIL.slot)) return h('div');
+  return h('div', { class: 'card pil-saves' }, h('span', { class: 'lbl' }, T('Auto Mode by save')),
+    h('div', { class: 'pil-saves-list' }, PIL.saves.map(k => {
+      const cb = h('input', { type: 'checkbox', checked: k.enabled, onchange: async e => {
+        e.target.disabled = true;
+        const r = await act(() => api(e.target.checked ? '/api/pilot/start' : '/api/pilot/stop', { slot: k.id }),
+          e.target.checked ? T('Auto Mode on for {0}.', k.name) : T('Auto Mode off for {0}.', k.name));
+        if (r && k.id === PIL.slot) { PIL.seq++; PIL.data = r; }
+        await pilSavesLoad(true);
+        if (PIL.data?.online && k.id === PIL.slot) pilCommand(); else renderPilot();
+      } });
+      return h('div', { class: 'pil-save' + (k.id === PIL.slot ? ' on' : ''), title: T('Show this save\u2019s Auto Mode'),
+        onclick: e => { if (e.target.closest('.switch') || k.id === PIL.slot) return; PIL.slot = k.id; pilMem('slot', k.id); renderPilot(); } },
+        h('span', { class: 'dot ' + (k.online ? 'ok' : '') }),
+        h('div', { class: 'grow' }, h('b', null, k.name), h('small', null, k.online ? (k.enabled ? T(PIL_STATE[k.state] || PIL_STATE.off) : T('In the game')) : T('Not in the game'))),
+        h('label', { class: 'switch', title: k.enabled ? T('Auto Mode on: click to turn it off') : T('Auto Mode off: click to turn it on') }, cb, h('span')));
+    })));
+}
+async function pilSavesLoad(force) {
+  if (!force && Date.now() - PIL.savesAt < 4000) return;
+  try { PIL.saves = (await api('/api/pilot/saves')).saves || []; PIL.savesAt = Date.now(); } catch (e) { return; }
+  if (PIL.els?.saves?.isConnected) PIL.els.saves.replaceWith(PIL.els.saves = pilSavesStrip());
+}
 const PILC = [];           // settings cards: {id, tab, order, build}
 // the modes: name, icon, the game's sprite on its tile, one line under the name
 const PIL_MODES = {
@@ -95,14 +123,34 @@ async function renderPilot() {
   clearInterval(PIL.timer);
   pilMapStop();
   await loadGameImages();
-  try { PIL.data = await api('/api/pilot'); } catch (e) { return gameError(e, 'pilot'); }
-  if (!PIL.data.online) return gameError(new Error(T('Opens once you have logged in to the game.')), 'pilot');     // the other In-game pages' text
+  await pilSavesLoad(true);
+  if (!PIL.slot) PIL.slot = pilMem('slot');
+  if (!PIL.saves.some(k => k.id === PIL.slot)) PIL.slot = (PIL.saves.find(k => k.active) || PIL.saves[0] || {}).id || null;
+  try { PIL.data = await pilApi('/api/pilot'); } catch (e) { return gameError(e, 'pilot'); }
+  if (!PIL.data.online) {                               // this save's pilot is not in the game: the strip (its switch) and the other In-game pages' text
+    const saves = pilSavesStrip(), cur = PIL.saves.find(k => k.id === PIL.slot);
+    $('#content').replaceChildren(h('div', { class: 'stack' }, saves, h('div', { class: 'card' }, h('div', { class: 'empty' },
+      h('p', null, T('Opens once you have logged in to the game.')),
+      cur && PIL.saves.length > 1 ? h('p', { class: 'small muted' }, cur.enabled ? T('Auto Mode is on for {0}: it starts flying when this save plays.', cur.name)
+        : T('Auto Mode is off for {0}.', cur.name)) : null,
+      btn(T('Refresh'), () => go('pilot'), '', 'refresh')))));
+    PIL.els = { saves };
+    clearInterval(PIL.timer);
+    PIL.timer = setInterval(async () => {
+      if (!saves.isConnected) return clearInterval(PIL.timer);
+      if (document.visibilityState !== 'visible') return;
+      await pilSavesLoad();
+      if (PIL.saves.find(k => k.id === PIL.slot)?.online) renderPilot();
+    }, 2000);
+    S.timers.push(PIL.timer);
+    return;
+  }
   if (PIL.data.status?.catalog) PIL.cat = PIL.data.status.catalog;
   if (!PIL.tab) { const t = pilMem('tab'); PIL.tab = PIL_TABS.some(([k]) => k === t) ? t : 'mode'; }
-  const e = PIL.els = { header: h('div'), cmd: h('div', { class: 'card pil-cmd' }), rail: h('div', { class: 'pil-rail' }),
+  const e = PIL.els = { saves: pilSavesStrip(), header: h('div'), cmd: h('div', { class: 'card pil-cmd' }), rail: h('div', { class: 'pil-rail' }),
     tabs: h('div', { class: 'seg pil-tabs' }), cards: h('div', { class: 'grid pil-cards' }) };
   PIL.journal = 0;
-  $('#content').replaceChildren(h('div', { class: 'stack pil-page' }, e.header, e.cmd, h('div', { class: 'pil-main' }, pilMapBuild(), e.rail), e.tabs, e.cards));
+  $('#content').replaceChildren(h('div', { class: 'stack pil-page' }, e.saves, e.header, e.cmd, h('div', { class: 'pil-main' }, pilMapBuild(), e.rail), e.tabs, e.cards));
   pilTabs();
   pilCards();
   pilRefresh();
@@ -112,7 +160,8 @@ async function renderPilot() {
     PIL.polling = true;
     const seq = PIL.seq;
     try {
-      const d = await api('/api/pilot');
+      const d = await pilApi('/api/pilot');
+      pilSavesLoad();
       if (seq !== PIL.seq) return;                  // a save went out meanwhile: its answer is newer
       PIL.data = d;
     } catch (err) { return; } finally { PIL.polling = false; }
@@ -155,7 +204,7 @@ function pilRefreshAliens() {
 
 // ------------------------------------------------------------ settings: one path per setting ('flee_hp', 'pet.gear')
 const pilGet = path => path.split('.').reduce((o, k) => (o == null ? o : o[k]), PIL.data.config);
-const pilSave = (values, msg = T('Saved.')) => { PIL.seq++; return act(async () => { PIL.data = await api('/api/pilot', { config: values }); }, msg); };
+const pilSave = (values, msg = T('Saved.')) => { PIL.seq++; return act(async () => { PIL.data = await pilApi('/api/pilot', { config: values }); }, msg); };
 const pilSet = (path, v) => { const [a, b] = path.split('.'); return pilSave(b ? { [a]: { [b]: v } } : { [a]: v }); };
 const pilNum = (path, min, max, step = 1, scale = 1) => h('input', { class: 'input num', type: 'number', min, max, step,
   value: scale === 1 ? pilGet(path) : Math.round(pilGet(path) * scale), 'data-pilnum': path + '|' + scale,
@@ -248,9 +297,9 @@ function pilCommand() {
     p.on = on;
     const b = btn(on ? T('Stop') : T('Start'), async () => {
       b.disabled = true;
-      const r = await act(() => api(on ? '/api/pilot/stop' : '/api/pilot/start', {}));
+      const r = await act(() => pilApi(on ? '/api/pilot/stop' : '/api/pilot/start', {}));
       b.disabled = false;
-      if (r) { PIL.seq++; PIL.data = r; pilCommand(); }
+      if (r) { PIL.seq++; PIL.data = r; pilCommand(); pilSavesLoad(true); }
     }, on ? 'danger' : 'primary', on ? 'stop' : 'play');
     pilFill(p.go, b, h('small', null, on ? T('The server is flying your ship.') : T('Your ship is yours: nothing runs.')));
   }
@@ -1228,7 +1277,7 @@ PILC.push({ id: 'players', tab: 'safety', order: 30, build: () => pilCard('users
 
 // ------------------------------------------------------------ Settings
 async function pilProfile(action, name) {
-  const r = await act(() => api('/api/pilot/profile', { action, name }), action === 'delete' ? T('Profile deleted.') : action === 'load' ? T('Profile loaded.') : T('Profile saved.'));
+  const r = await act(() => pilApi('/api/pilot/profile', { action, name }), action === 'delete' ? T('Profile deleted.') : action === 'load' ? T('Profile loaded.') : T('Profile saved.'));
   if (r) { PIL.seq++; PIL.data = r; pilTabs(); pilCards(); pilCommand(); }
 }
 
