@@ -3387,5 +3387,19 @@
 "{0} items deleted.": "{0} objets supprimés.",
 "{0} items replaced.": "{0} objets remplacés.",
 "{0} couldn't be equipped in their old place: they are in the inventory.": "{0} n'ont pas pu être équipés à leur ancienne place : ils sont dans l'inventaire.",
-"{0} items changed.": "{0} objets modifiés."
+"{0} items changed.": "{0} objets modifiés.",
+"{0} of {1} drones done.": "{0} drones sur {1} faits.",
+"{0} added from the catalog.": "{0} ajoutés depuis le catalogue.",
+"Drone look": "Apparence de drone",
+"Design on all drones…": "Design sur tous les drones…",
+"The same design on every drone of this config.": "Le même design sur tous les drones de cette config.",
+"Look on all drones…": "Apparence sur tous les drones…",
+"The same look on every drone of this config.": "La même apparence sur tous les drones de cette config.",
+"Design on all drones": "Design sur tous les drones",
+"Look on all drones": "Apparence sur tous les drones",
+"{0} drones, config {1}. Free copies are used first; missing ones are added. What was in that slot goes back to the inventory.": "{0} drones, config {1}. Les exemplaires libres sont utilisés d'abord ; ceux qui manquent sont ajoutés. Ce qui occupait cet emplacement retourne dans l'inventaire.",
+"None in the inventory.": "Aucun dans l'inventaire.",
+"Or pick any of them from the catalog.": "Ou choisis-en un dans le catalogue.",
+"From the catalog…": "Depuis le catalogue…",
+"Drone looks": "Apparences de drone"
 }
