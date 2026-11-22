@@ -3440,5 +3440,7 @@
 "A clan can have any number of members (yours and the bot clans). When off, at most 50 members per clan, as in the game.": "Un clan peut avoir autant de membres que voulu (le tien et ceux des bots). Désactivé : 50 membres au maximum par clan, comme dans le jeu.",
 "Gates to play (one after the other)": "Portails à jouer (l'un après l'autre)",
 "Play the list again and again (each gate built again within the build budget)": "Rejouer la liste en boucle (chaque portail reconstruit dans la limite du budget de construction)",
-"Next gate: {0}.": "Portail suivant : {0}."
+"Next gate: {0}.": "Portail suivant : {0}.",
+"Instant battle station": "Station de combat instantanée",
+"Your own Clan Battle Station is built at once: its modules are installed and the station is finished without waiting (bot clans still take their time).": "Ta propre station de combat de clan se construit tout de suite : ses modules s'installent et la station est terminée sans attendre (les clans des bots prennent toujours leur temps)."
 }
