@@ -2708,8 +2708,11 @@ async function renderSkylab() {
           && skylabAction(m.id, 'abortUpgrade'), 'sm'));
     } else if (c) {
       buttons.push(btn(rate ? T('Build') : T('Upgrade'), () => skylabAction(m.id, 'upgrade'), 'sm primary'));
-      if (c.uridium) buttons.push(btn(T('Instant ({0} U.)', fmtN(c.uridium)), () => skylabAction(m.id, 'instantUpgrade'), 'sm'));
+      buttons.push(btn(c.uridium ? T('Instant ({0} U.)', fmtN(c.uridium)) : T('Instant (free)'), () => skylabAction(m.id, 'instantUpgrade'), 'sm'));
     }
+    // quick upgrade: instant levels one after the other up to the highest (a running upgrade is finished first)
+    if (m.level < m.maximum && (c || m.remaining != null)) buttons.push(btn(T('Max level'), () => skylabMax(m.id, skModuleName(m.id)), 'sm', 'zap',
+      { title: T('Instant upgrades up to level {0}, paid with uridium like the Instant button.', m.maximum) }));
     if (m.toggleable && !rate && m.remaining == null) buttons.push(btn(m.state === 'ACTIVE' ? T('Close') : T('Open'),
       () => skylabAction(m.id, m.state === 'ACTIVE' ? 'setInactive' : 'setActive'), 'sm ghost'));
     return h('div', { class: 'sk-module' + (m.state === 'ACTIVE' ? ' on' : '') },
@@ -2733,6 +2736,8 @@ async function renderSkylab() {
         btn(T('Fast send ({0} U.)', fmtN(v.instant_price)), () => skylabAction('TRANSPORT_MODULE', 'startTransport', 'fast'), 'sm')));
   $('#content').replaceChildren(h('div', { class: 'stack' },
     gameHeader(v, 'skylab', h('span', { class: 'pill' + (v.energy.used > v.energy.solar ? ' err' : '') }, T('Energy'), ' ', h('b', null, fmtN(v.energy.used) + ' / ' + fmtN(v.energy.solar))),
+      v.modules.some(m => m.level < m.maximum && (m.cost || m.remaining != null)) ? btn(T('Everything to max'), () => skylabMax('ALL', null), 'sm primary', 'zap',
+        { title: T('Every module to its highest level with instant upgrades (base and solar modules first).') }) : null,
       btn(null, () => renderSkylab(), 'icon', 'refresh', { title: T('Refresh') })),
     h('div', { class: 'card' }, h('h2', null, T('Storage')), h('div', { class: 'sk-storage' }, storage)),
     h('div', { class: 'sk-modules' }, modules),
@@ -2746,6 +2751,19 @@ async function skylabAction(module, operation, mod) {
     if (r.errors.length) toast(skText(r.errors[0]), 'err');
     else if (r.achievements.length) toast(skText(r.achievements[r.achievements.length - 1]), 'ok');
     if (r.done && operation === 'startTransport') SK.send = {};
+  }
+  renderSkylab();
+}
+
+async function skylabMax(module, name) {
+  if (!await confirmBox(name ? T('{0} to the highest level?', name) : T('Every module to the highest level?'),
+    T('Instant upgrades one level after the other, paid with uridium at the usual price; a running upgrade is finished first. It stops if uridium or energy runs out.'),
+    { ok: T('Upgrade') })) return;
+  const r = await act(() => api('/api/game/skylab/action', { module, operation: 'instantMax', mod: '', amounts: {} }));
+  if (r) {
+    if (r.levels) toast(T('{0} levels gained.', r.levels), r.left.length ? 'info' : 'ok');
+    if (r.left.length && r.errors.length) toast(skText(r.errors[0]), 'err');
+    else if (!r.levels && !r.left.length) toast(T('Already at the highest level.'), 'ok');
   }
   renderSkylab();
 }
