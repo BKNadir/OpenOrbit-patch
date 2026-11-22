@@ -186,6 +186,7 @@ BLOCKS = {
     },
     'gates': {                                     # Galaxy gate mode: a galaxy gate end to end
         'key': ('str', '', 30),                    # galaxy_gates.GATES key (alpha, beta ...)
+        'keys': ('strs', [], 30),                  # fork: the gates to play one after the other (in this order); empty: key alone
         'min_lives': ('int', 1, 0, 10),            # buy lives up to this before going in / after a death
         'life_budget': ('int', 0, 0, 10 ** 8),     # uridium for lives per session
         'build_budget': ('int', 0, 0, 10 ** 9),    # uridium for the generator's spins per session (a gate whose parts are missing)
@@ -233,6 +234,12 @@ def _clean_block(spec, d):
                     continue
                 if x not in vals:
                     vals.append(x)
+            out[k] = vals[:lim[0]] if lim else vals
+        elif kind == 'strs':                      # a list of short texts without repeats (gate keys)
+            vals = []
+            for x in v if isinstance(v, list) else []:
+                if isinstance(x, str) and x and x[:30] not in vals:
+                    vals.append(x[:30])
             out[k] = vals[:lim[0]] if lim else vals
         elif kind == 'str':
             out[k] = str(v)[:lim[0]] if isinstance(v, (str, int)) and not isinstance(v, bool) else default

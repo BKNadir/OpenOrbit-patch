@@ -89,7 +89,7 @@ const PIL_NOTES = [N('Started in {0} mode.'), N('Stopped.'), N('Stopped: {0}'), 
   N('No safe zone on this map: flying away from the aliens.'), N('Wave cleared: going to the next wave portal.'),
   N('{0} took no damage for {1} s: left alone for a while.'), N('Could not take a box: skipped.'), N('Cargo full but no station within reach.'),
   N('Cargo sold: {0} credits.'), N('Could not buy {0} (budget or money).'), N('Bought {0} {1} for {2} credits.'), N('Bought {0} {1} for {2} uridium.'),
-  N('{0}: life bought ({1} U).'), N('{0} completed: playing it again.'), N('{0}: {1}/{2} parts, the gate cannot be prepared.'), N('{0} prepared.'),
+  N('{0}: life bought ({1} U).'), N('{0} completed: playing it again.'), N('Next gate: {0}.'), N('{0}: {1}/{2} parts, the gate cannot be prepared.'), N('{0} prepared.'),
   N('Entering the {0}.'), N('Enemy pilot nearby: {0}.'), N('Leaving the map for {0}.'), N('Enemy pilot nearby but no safe zone on this map: carrying on.'),
   N('Quest: {0} ({1}).'), N('No quest to play.'), N('Quest handed in: {0}.'), N('Quest taken: {0}.'), N('No quest to take here.'), N('Ship destroyed.'),
   N('Repaired at the base ({0}/{1}).'), N('Used {0}.'), N('Shield low: switched to config {0}.'), N('P.E.T. repaired ({0} U).'), N('P.E.T. launched.'),
@@ -1131,21 +1131,39 @@ PILC.push({ id: 'ore', tab: 'mode:hunt', order: 40, build: () => pilCard('cart',
   pilCheck('ore.sell', T('Sell the cargo at the base when it is full, then come back'))) });
 
 // ------------------------------------------------------------ Galaxy gate mode
+// the gates to play (fork): checked ones are played one after the other, in the list's order (round and round with "play again")
+function pilGateList(gates, label) {
+  const box = h('div', { class: 'pil-checks' });
+  const draw = () => {
+    const sel = pilGet('gates.keys') || [];
+    box.replaceChildren(...gates.map(g => h('label', { class: 'pil-check' },
+      h('input', { type: 'checkbox', checked: sel.includes(g.key), onchange: e => {
+        const cur = (pilGet('gates.keys') || []).filter(k => k !== g.key);
+        const list = e.target.checked ? gates.map(x => x.key).filter(k => k === g.key || cur.includes(k)) : cur;     // the gates' own order
+        pilSet('gates.keys', list).then(() => { draw(); pilCards(); });
+      } }), h('span', null, label(g)))));
+  };
+  draw();
+  return box;
+}
+
 PILC.push({ id: 'gates', tab: 'mode:gate', order: 10, build: () => {
   const gates = PIL.cat.gates || [];
-  const cur = gates.find(g => g.key === pilGet('gates.key'));
+  const keys = pilGet('gates.keys') || [];
+  if (!keys.length && pilGet('gates.key')) pilSet('gates.keys', [pilGet('gates.key')]);       // the old single gate becomes the list's first
+  const cur = gates.find(g => g.key === (keys[0] || pilGet('gates.key')));
   const label = g => g.name + ' · ' + (g.ready ? T('ready, {0} lives', g.lives) : g.built ? T('built') : T('parts {0}/{1}', g.parts, g.need));
   return pilCard('star', T('Galaxy gate'),
     T("Builds the gate with the Galaxy Gate Generator's spins when parts are missing (free energy first, then uridium within the build budget), prepares it, buys lives, enters through its portal on X-1 and plays every wave; on the other maps it does not hunt. After a death it repairs at the base and goes back in. Careful: when the last life is lost the gate and its parts are gone."),
-    gates.length ? pilFields(field(T('Gate'), pilSelect('gates.key', [['', T('Choose…')], ...gates.map(g => [g.key, label(g)])])),
-      field(T('Keep at least (lives)'), pilNum('gates.min_lives', 0, 10)), field(T('Lives budget (U)'), pilNum('gates.life_budget', 0, 1e8, 1000)),
+    gates.length ? h('div', null, h('div', { class: 'lbl', style: { marginBottom: '6px' } }, T('Gates to play (one after the other)')), pilGateList(gates, label)) : null,
+    gates.length ? pilFields(field(T('Keep at least (lives)'), pilNum('gates.min_lives', 0, 10)), field(T('Lives budget (U)'), pilNum('gates.life_budget', 0, 1e8, 1000)),
       field(T('Build budget (U)'), pilNum('gates.build_budget', 0, 1e9, 1000)),
       field(T('Leave the gate at (lives, 0: never)'), pilNum('gates.leave_lives', 0, 10))) : pilNoGame(),
     cur ? h('div', { class: 'pil-gauges', style: { margin: '0 0 12px' } },
       pilGauge(T('Waves'), cur.wave, cur.waves, 'var(--accent)', (cur.wave + 1) + ' / ' + cur.waves),
       pilGauge(T('Parts'), cur.parts, cur.need, 'var(--violet)', cur.parts + ' / ' + cur.need),
       pilGauge(T('Lives'), cur.lives, Math.max(cur.lives, 10), 'var(--ok)', String(cur.lives))) : null,
-    pilCheck('gates.repeat', T("Once completed, play it again (built again within the build budget)")),
+    pilCheck('gates.repeat', T('Play the list again and again (each gate built again within the build budget)')),
     h('p', { class: 'desc', style: { marginTop: '12px' } }, T('When the gate is done or cannot be played (not built, no life left, no route):')),
     pilThen('gates', 'gate'));
 } });

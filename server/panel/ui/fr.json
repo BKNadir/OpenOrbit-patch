@@ -3437,5 +3437,8 @@
 "Take a new quest at a quest giver when none can be played (lowest level first, then up)": "Prendre une nouvelle quête chez un donneur de quêtes quand aucune ne peut être jouée (le niveau le plus bas d'abord, puis en montant)",
 "Attack them": "Les attaquer",
 "Clans without member limit": "Clans sans limite de membres",
-"A clan can have any number of members (yours and the bot clans). When off, at most 50 members per clan, as in the game.": "Un clan peut avoir autant de membres que voulu (le tien et ceux des bots). Désactivé : 50 membres au maximum par clan, comme dans le jeu."
+"A clan can have any number of members (yours and the bot clans). When off, at most 50 members per clan, as in the game.": "Un clan peut avoir autant de membres que voulu (le tien et ceux des bots). Désactivé : 50 membres au maximum par clan, comme dans le jeu.",
+"Gates to play (one after the other)": "Portails à jouer (l'un après l'autre)",
+"Play the list again and again (each gate built again within the build budget)": "Rejouer la liste en boucle (chaque portail reconstruit dans la limite du budget de construction)",
+"Next gate: {0}.": "Portail suivant : {0}."
 }

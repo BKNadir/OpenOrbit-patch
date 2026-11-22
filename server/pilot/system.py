@@ -97,6 +97,7 @@ class Pilot:
         self.run_mode = mode
         self.errand = ''                # going somewhere (travel, home, sell, quest, gate_trip): see fight_or_collect
         self.hunt_map, self.empty_since, self.gate_done = None, None, False
+        self.gate_key, self.gate_played, self.gate_skipped = None, set(), set()     # Galaxy gate mode's list (tasks/gates.goal)
         self.quest_goal = self.quest_maps = self.quest_aliens = None      # Quests mode: the quest's goal, maps, aliens (tasks/quests.py)
         self.quest_rules = None                                           # and the active quests' restrictions
         self.quest_skip = {}                                              # (quest, condition) -> until when it is set aside
