@@ -3443,5 +3443,7 @@
 "Next gate: {0}.": "Portail suivant : {0}.",
 "Instant battle station": "Station de combat instantanée",
 "Your own Clan Battle Station is built at once: its modules are installed and the station is finished without waiting (bot clans still take their time).": "Ta propre station de combat de clan se construit tout de suite : ses modules s'installent et la station est terminée sans attendre (les clans des bots prennent toujours leur temps).",
-"Quests to take at once": "Quêtes à prendre d'un coup"
+"Quests to take at once": "Quêtes à prendre d'un coup",
+"Pilot points (most)": "Points de pilote (maximum)",
+"How many pilot points (skill tree) log disks can be turned into (game value 50). The points past 50 cost the last price, 3,202 log disks each.": "Combien de points de pilote (arbre de compétences) les disques de journal peuvent donner (valeur du jeu : 50). Les points au-delà de 50 coûtent le dernier prix, 3 202 disques de journal chacun."
 }

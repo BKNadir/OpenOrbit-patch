@@ -166,6 +166,8 @@ SCHEMA = [
     _c('ore_abundance', 'Ore abundance', 'world', 'Number of collectable ores (Prometium, Endurium, Terbium …) on the maps.',
        apply_mode='map', hi=10.0, limit=50.0),
     _c('ore_respawn', 'Ore respawn time', 'world', 'Time until a collected ore is replaced. Lower value: faster.', lo=0.01, hi=5.0, limit=100.0),
+    _n('skill_points_max', 'Pilot points (most)', 'world', 'How many pilot points (skill tree) log disks can be turned into (game value 50). '
+       'The points past 50 cost the last price, 3,202 log disks each.', lo=50, hi=200, default=50, limit=1000),
     _n('max_quests', 'Quests at the same time', 'world', 'How many quests you can run at the same time in the quest window (game value 5). When all slots are '
                                                          'taken, no new quest can be accepted until one is completed or cancelled. Lowering it does not '
                                                          'cancel running quests.', lo=1, hi=10, default=5, unit='quests', limit=100),
