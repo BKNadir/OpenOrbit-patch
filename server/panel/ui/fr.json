@@ -3414,5 +3414,15 @@
 "Loading…": "Chargement…",
 "The game is running with this save: most of these apply at the next login.": "Le jeu tourne avec cette sauvegarde : la plupart de ces réglages s'appliquent à la prochaine connexion.",
 "Saved right away (not part of the editor's changes); they apply when you play this save.": "Enregistré tout de suite (ne fait pas partie des modifications de l'éditeur) ; s'applique quand tu joues avec cette sauvegarde.",
-"Whether this save plays as an administrator in the game. Each save has its own setting.": "Si cette sauvegarde joue en administrateur dans le jeu. Chaque sauvegarde a son propre réglage."
+"Whether this save plays as an administrator in the game. Each save has its own setting.": "Si cette sauvegarde joue en administrateur dans le jeu. Chaque sauvegarde a son propre réglage.",
+"Instant (free)": "Instantané (gratuit)",
+"Max level": "Niveau max",
+"Instant upgrades up to level {0}, paid with uridium like the Instant button.": "Améliorations instantanées jusqu'au niveau {0}, payées en uridium comme le bouton Instantané.",
+"Everything to max": "Tout au maximum",
+"Every module to its highest level with instant upgrades (base and solar modules first).": "Tous les modules à leur niveau maximum avec des améliorations instantanées (module de base et solaire d'abord).",
+"{0} to the highest level?": "{0} au niveau maximum ?",
+"Every module to the highest level?": "Tous les modules au niveau maximum ?",
+"Instant upgrades one level after the other, paid with uridium at the usual price; a running upgrade is finished first. It stops if uridium or energy runs out.": "Améliorations instantanées niveau après niveau, payées en uridium au prix habituel ; une amélioration en cours est d'abord terminée. Ça s'arrête si l'uridium ou l'énergie manque.",
+"{0} levels gained.": "{0} niveaux gagnés.",
+"Already at the highest level.": "Déjà au niveau maximum."
 }
