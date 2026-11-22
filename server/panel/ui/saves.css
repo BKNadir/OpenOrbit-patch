@@ -324,6 +324,14 @@ body.se-busy .se-main { opacity: .75; transition: opacity .2s .15s; pointer-even
   background: rgba(4, 9, 18, .55); }
 .se-cat-bottom b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* the save's admin settings (character editor) */
+.se-admin-row { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 4px; }
+.se-admin-row > .grow { flex: 1 1 260px; min-width: 0; }
+.se-admin-row > .switch, .se-admin-row > .seg { flex: none; }
+.se-admin-row.lead { border-color: rgba(64, 223, 255, .45); }
+.se-admin-row.off { opacity: .5; }
+.se-admin { display: grid; gap: 10px; align-content: start; }
+
 /* change summary */
 .se-diff { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px dashed rgba(110, 160, 220, .12); }
 .se-diff:last-of-type { border-bottom: 0; }
@@ -385,3 +393,4 @@ body.se-busy .se-main { opacity: .75; transition: opacity .2s .15s; pointer-even
 /* Statistics tab (keIstatistik) */
 .se-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px 24px; margin-bottom: 10px; }
 .se-stats .row { gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line, rgba(255,255,255,.06)); }
+

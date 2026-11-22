@@ -1016,6 +1016,7 @@ async function renderSettings() {
   const copySel = h('select', { class: 'input', style: { maxWidth: '240px' } }, (r.saves || []).map(k => h('option', { value: k.id }, k.name)));
   const saveCard = r.record ? h('div', { class: 'card' }, h('h2', null, icon('save'), T("This save's settings: {0}", r.save_name)),
     h('p', { class: 'desc' }, T('Game settings and event choices belong to each save; when the active save changes, the settings change too.')),
+    h('p', { class: 'desc' }, T("Admin mode is set per save, in the save's character editor (Pilot tab).")),
     (r.saves || []).length ? h('div', { class: 'row' }, copySel,
       btn(T('Copy from this save'), async () => {
         const src = r.saves.find(k => k.id === copySel.value);
