@@ -815,7 +815,8 @@ function seSelToggle(ids) {
 const seSelModeButton = () => btn(SE.selMode ? T('Done selecting') : T('Select several'), () => { SE.selMode ? seSelClear() : SE.selMode = true; seRender(); },
   'sm' + (SE.selMode ? ' primary' : ''), 'check', { title: T('Click items to select them, then act on all of them at once.') });
 // fitted where: "Goliath · config 1, 2"
-const seWhere = e => e.ship && e.configs?.length ? itemName(SE.v.ships.find(g => g.id === e.ship)?.lootId || '') + ' · ' + T('config {0}', e.configs.join(', ')) : '';
+const seWhere = e => !e.ship || !e.configs?.length ? '' : (e.ship === SE.ship ? '' : itemName(SE.v.ships.find(g => g.id === e.ship)?.lootId || '') + ' · ')
+  + (e.configs.length > 1 ? T('Configs {0}', e.configs.join(' + ')) : T('Config {0}', e.configs[0]));
 
 function seSelBar(v) {
   if (v.read_only || (!SE.selMode && !SE.sel.size)) return null;
@@ -830,6 +831,8 @@ function seSelBar(v) {
     h('div', { class: 'row wrap', style: { gap: '6px' } },
       btn(T('Equip on {0} · config {1}', itemName(g.lootId), SE.config), () => go({ operation: 'equip_many', items: ids, ship: g.id, config: +SE.config }), 'sm primary', 'download',
         { disabled: !es.length, title: T('Each item goes where it belongs (ship, drones or P.E.T.) while there is room.') }),
+      btn(T('Equip on both configs'), () => go({ operation: 'equip_many', items: ids, ship: g.id, config: 1 }, { operation: 'equip_many', items: ids, ship: g.id, config: 2 }), 'sm', 'download',
+        { disabled: !es.length, title: T('Each item is equipped in config 1 and config 2 of {0} (as in the game, the same item can be in both).', itemName(g.lootId)) }),
       here.length ? btn(T('Unequip from this config'), () => go({ operation: 'unequip_many', items: here.map(e => e.id), ship: g.id, config: +SE.config }), 'sm', 'upload') : null,
       fitted.length ? btn(T('Unequip everywhere'), () => go({ operation: 'unequip_many', items: fitted.map(e => e.id) }), 'sm', 'upload') : null,
       leveled.length ? btn(T('Level…'), () => seLevelMany(leveled), 'sm', 'edit') : null,
@@ -899,7 +902,9 @@ function seTrim(v) {
 const SE_SORT = [['name', N('Name')], ['kind', N('Kind')], ['count', N('Quantity')], ['upgrade', N('Upgrade')], ['new', N('Newest')]];
 function seInventory(v) {
   const g = seShip(v), ro = v.read_only;
-  const pool = SE.invEquipped ? v.inventory : v.inventory.filter(e => !seIsEquipped(e));     // by default only items equipped nowhere
+  // by default the items that can still go into the selected config: equipped nowhere, or only in the ship's other config (shown with a badge)
+  const pool = SE.invEquipped ? v.inventory : v.inventory.filter(seIsUsable);
+  const equipOp = (id, config) => ({ operation: 'equip_many', items: [id], ship: g.id, config: config || +SE.config });
   const kinds = [...new Set(pool.map(e => e.slot))];
   if (SE.invKind !== 'all' && !kinds.includes(SE.invKind)) SE.invKind = 'all';
   const q = SE.search.toLowerCase();
@@ -915,9 +920,17 @@ function seInventory(v) {
   const groups = Object.values(gr).sort((a, b) => by(a, b) || itemName(a[0].lootId).localeCompare(itemName(b[0].lootId)));
   const tile = es => {
     const e = es[0], ids = es.map(x => x.id), n = ids.filter(i => SE.sel.has(i)).length, where = seWhere(e);
-    return seItemButton({ class: 'se-inv-item' + (n ? ' picked' : '') + (seIsEquipped(e) ? ' fitted' : ''), type: 'button', title: where || undefined,
+    const can = e.targets.length > 0, usable = can && seIsUsable(e), here = e.ship === g.id && e.configs.includes(String(SE.config));
+    const other = String(3 - SE.config), both = e.ship === g.id && e.configs.length > 1;
+    return seItemButton({ class: 'se-inv-item' + (n ? ' picked' : '') + (seIsEquipped(e) ? ' fitted' : ''), type: 'button',
+      title: usable && !SE.selMode ? T('Right-click: equip on config {0}', SE.config) : where || undefined,
       onclick: ev => { if (ro) return; if (SE.selMode) return seSelToggle(ids); popMenu(ev.currentTarget, [
-        e.targets.includes('ship') && !seIsEquipped(e) ? { label: T('Equip on the selected ship ({0}, config {1})', itemName(g.lootId), SE.config), ic: 'download', fn: () => seApply(moveOp(e.id, 'equip', { target: 'ship' })) } : null,
+        usable ? { label: T('Equip on {0} · config {1}', itemName(g.lootId), SE.config), ic: 'download', fn: () => seApply(equipOp(e.id)) } : null,
+        can && !both && (!e.ship || e.ship === g.id) ? { label: T('Equip on both configs'), ic: 'download',
+          fn: () => seApply(...['1', '2'].filter(c => !e.configs.includes(c)).map(c => equipOp(e.id, +c))) } : null,
+        here ? { label: T('Unequip from config {0}', SE.config), ic: 'upload', fn: () => seApply({ operation: 'unequip_many', items: [e.id], ship: g.id, config: +SE.config }) } : null,
+        e.ship === g.id && e.configs.includes(other) && !here ? { label: T('Unequip from config {0}', other), ic: 'upload',
+          fn: () => seApply({ operation: 'unequip_many', items: [e.id], ship: g.id, config: +other }) } : null,
         seIsEquipped(e) ? { label: T('Unequip everywhere'), ic: 'upload', fn: () => seApply({ operation: 'unequip_many', items: ids }) } : null,
         seIsEditable(e) ? { label: T('Edit…'), ic: 'edit', fn: () => seEdit(e) } : null,
         { label: T('Duplicate…'), ic: 'copy', fn: () => seDuplicate(e) },
@@ -927,11 +940,14 @@ function seInventory(v) {
         { label: T('Delete one'), ic: 'trash', danger: true, fn: () => seApply({ operation: 'remove', items: [e.id] }) },
         es.length > 1 ? { label: T('Delete all ({0})', es.length), ic: 'trash', danger: true, fn: () => seApply({ operation: 'remove', items: ids }) } : null,
       ].filter(Boolean)); },
-      oncontextmenu: ev => { if (!SE.selMode || !n) return; ev.preventDefault(); SE.sel.delete(ids.find(i => SE.sel.has(i))); seRender(); } },
+      // right-click: equip one of them on the selected config (in selection mode: deselect one)
+      oncontextmenu: ev => { if (ro) return; ev.preventDefault();
+        if (SE.selMode) { if (n) { SE.sel.delete(ids.find(i => SE.sel.has(i))); seRender(); } return; }
+        const x = es.find(seIsUsable); if (can && x) seApply(equipOp(x.id)); } },
     e, itemIcon(e.lootId, 54), ...lvlBadge(e),
     es.length > 1 ? h('span', { class: 'se-qty' }, (n && n < es.length ? n + '/' : '') + '×' + es.length) : null,
     n ? h('span', { class: 'se-tick' }, icon('check')) : null,
-    h('span', { class: 'name' }, itemName(e.lootId)), where ? h('span', { class: 'se-where' }, where) : null);
+    h('span', { class: 'name' }, itemName(e.lootId)), where ? h('span', { class: 'se-where' + (here ? ' here' : '') }, where) : null);
   };
   const shown = groups.flat().map(e => e.id);
   const toggle = (on, text, fn) => h('label', { class: 'row small se-toggle' }, h('input', { type: 'checkbox', checked: on, onchange: e => { fn(e.target.checked); seRender(); } }), text);
@@ -944,6 +960,9 @@ function seInventory(v) {
       ro ? null : seSelModeButton(),
       ro ? null : btn(T('Clean up…'), () => seTrim(v), 'sm', 'trash', { title: T('Keep at most N unequipped items of each kind.') }),
       ro ? null : btn(T('Add item'), () => seCatalog({}), 'primary sm', 'plus')),
+    h('div', { class: 'row wrap between', style: { gap: '12px', marginTop: '12px' } }, shipPicker(v, g),
+      h('span', { class: 'small muted' }, SE.invEquipped ? T('All items, with where they are equipped.')
+        : T('Items you can still equip in config {0}: free ones, and those only in config {1} (badge).', SE.config, 3 - SE.config))),
     h('div', { class: 'row wrap', style: { gap: '16px', marginTop: '10px' } },
       toggle(SE.invGroup, T('Group identical items'), x => { SE.invGroup = x; }),
       toggle(SE.invEquipped, T('Also show equipped items'), x => { SE.invEquipped = x; }),

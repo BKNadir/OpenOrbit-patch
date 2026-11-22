@@ -86,6 +86,13 @@ def _design_slot(l):
     return ((d.get('slot') if isinstance(d, dict) else None) or 'design') if d is not None else None
 
 
+def _design_taken(pr, sid, cid, uid, slot):
+    """Whether that drone's design slot ('design' or 'visual') already holds something in the ship's config. The game swaps a design into an
+    occupied slot, so equipping one more would push the previous one out instead of failing."""
+    x = next((d for d in pr.d['drones'] if int(d['uid']) == int(uid)), None)
+    return bool(x and pr.drone_design_id(x, slot, int(cid), str(sid)))
+
+
 def catalog():
     import shop as SHP
     import pet as PETM
@@ -754,6 +761,7 @@ def op_duplicate(pr, m, o):
         drones = [first] + [x['uid'] for x in pr.d['drones'] if x['uid'] != first]
     made = fitted = 0
     fitting = bool(equip)
+    dslot = _design_slot(pr.d['items'][i]) if drones else None   # drone designs: only empty design slots count as free
     for _k in range(n):
         new = _clone(pr, i)
         made += 1
@@ -761,6 +769,11 @@ def op_duplicate(pr, m, o):
             continue
         ok = False
         while not ok:
+            if dslot and _design_taken(pr, equip.get('ship'), equip.get('config'), drones[0], dslot):
+                if len(drones) > 1:
+                    drones.pop(0)
+                    continue
+                break
             try:
                 op_move(pr, m, dict(equip, direction='equip', item=new, **({'drone': drones[0]} if drones else {})))
                 ok = True
@@ -947,7 +960,8 @@ def _equip_anywhere(pr, m, i, ship, config):
     if SHP.slot_of(loot):
         tries.append({'target': 'ship'})
     if SHP.drone_ok(loot) or loot in SHP.DESIGNS:
-        tries += [{'target': 'drone', 'drone': x['uid']} for x in pr.d['drones']]
+        ds = _design_slot(loot)
+        tries += [{'target': 'drone', 'drone': x['uid']} for x in pr.d['drones'] if not (ds and _design_taken(pr, ship, config, x['uid'], ds))]
     if PETM.slot_for(loot):
         tries.append({'target': 'pet'})
         if PETM.heat_slot_ok(loot):
