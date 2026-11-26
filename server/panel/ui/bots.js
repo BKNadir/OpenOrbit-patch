@@ -146,7 +146,7 @@ function btWizard() {
   const r = BT.entries;
   const w = { name: '', description: '', world: (r.worlds.find(d => !r.entries.some(p => p.world === d.id)) || r.worlds[0] || {}).id || null, mode: 'normal',
     progression: 'progressive', count: 80, lang: 'mixed', name_lang: 'mixed', name_source: 'production', company_distribution: [1, 1, 1], special: '', settings: { jumpstart_hours: 60, simple_power: 1, simple_friendly: 0.5,
-      simple_maps: { 'X-1': 2, 'X-2': 2, 'X-3': 2, 'X-4': 2, '4-X': 3, 'X-5': 1, 'X-6': 1, 'X-7': 1, 'X-8': 1, '4-5': 2, '5-X': 2, BL: 3 } } };
+      simple_maps: { 'X-1': 2, 'X-2': 2, 'X-3': 2, 'X-4': 2, '4-X': 3, 'X-5': 1, 'X-6': 1, 'X-7': 1, 'X-8': 1, '4-5': 2, '5-X': 2, BL: 2 } } };
   let step = 0;
   const body = h('div', { class: 'stack', style: { gap: '14px' } });
   const footer = h('div', { class: 'row', style: { gap: '8px', justifyContent: 'flex-end', width: '100%' } });

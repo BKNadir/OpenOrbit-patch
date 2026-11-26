@@ -13,7 +13,7 @@ import map_links as H
 from .brain import Goal, target
 from . import catalog as K
 
-DEFAULT_MAPS = {'X-1': 2, 'X-2': 2, 'X-3': 2, 'X-4': 2, '4-X': 3, 'X-5': 1, 'X-6': 1, 'X-7': 1, 'X-8': 1, '4-5': 2, '5-X': 2, 'BL': 3}      # BL: a team per map (blacklight.team)
+DEFAULT_MAPS = {'X-1': 2, 'X-2': 2, 'X-3': 2, 'X-4': 2, '4-X': 3, 'X-5': 1, 'X-6': 1, 'X-7': 1, 'X-8': 1, '4-5': 2, '5-X': 2, 'BL': 2}      # pirate and BL: like the standard maps
 
 # map class -> (ship, laser, laser count share, shield generator, drone count, drone): the typical player on that map
 CLASS_GEAR = {
@@ -27,9 +27,10 @@ CLASS_GEAR = {
     'X-7': ('ship_goliath', 'equipment_weapon_laser_lf-3', 1.0, 'equipment_generator_shield_sg3n-b02', 8, 'drone_iris'),
     'X-8': ('ship_goliath', 'equipment_weapon_laser_lf-3', 1.0, 'equipment_generator_shield_sg3n-b02', 8, 'drone_iris'),
     '4-5': ('ship_goliath', 'equipment_weapon_laser_lf-3', 1.0, 'equipment_generator_shield_sg3n-b02', 8, 'drone_iris'),
-    '5-X': ('ship_goliath', 'equipment_weapon_laser_lf-3', 1.0, 'equipment_generator_shield_sg3n-b02', 8, 'drone_iris'),
-    'BL': ('ship_goliath', 'equipment_weapon_laser_pr-l', 1.0, 'equipment_generator_shield_sg3n-b02', 8, 'drone_iris'),      # Prometheus: made for BL
+    '5-X': ('ship_goliath', 'equipment_weapon_laser_lf-4', 1.0, 'equipment_generator_shield_sg3n-b02', 8, 'drone_iris'),
+    'BL': ('ship_goliath', 'equipment_weapon_laser_pr-l', 1.0, 'equipment_generator_shield_sg3n-b03', 8, 'drone_iris'),      # Prometheus: made for BL
 }
+WELL_EQUIPPED = ('5-X', 'BL')     # never below their map's equipment (the strength ratio only raises it): weaker pilots die there at once
 CLASS_LEVEL = {'X-1': 3, 'X-2': 5, 'X-3': 7, 'X-4': 9, '4-X': 11, 'X-5': 13, 'X-6': 14, 'X-7': 15, 'X-8': 16, '4-5': 17, '5-X': 18, 'BL': 24}
 
 
@@ -69,13 +70,16 @@ def gear(map_id, power=1.0, r=random):
     g = K.ITEMS['ships'][ship]
     order = ['equipment_weapon_laser_lf-1', 'equipment_weapon_laser_mp-1', 'equipment_weapon_laser_sll-01',
             'equipment_weapon_laser_lf-2', 'equipment_weapon_laser_lf-3']
-    i = order.index(laser) if laser in order else 0
-    if power >= 1.5 and i + 1 < len(order):
+    i = order.index(laser) if laser in order else -1           # LF-4 and Prometheus (pirate, BL maps) are not on this ladder
+    if 0 <= i and power >= 1.5 and i + 1 < len(order):
         laser = order[i + 1]
     elif power <= 0.6 and i > 0:
         laser = order[i - 1]
     full = max(0.25, min(1.0, pay * power * r.uniform(0.8, 1.1)))
     drones = max(0, min(8, int(round(drones * min(power, 1.3) * r.uniform(0.7, 1.2))))) if drone else 0
+    well = map_class(map_id) in WELL_EQUIPPED
+    if well:
+        full, drones, power = 1.0, max(drones, 8 if drone else 0), max(power, 1.4)        # all slots, every drone, MCB-25
     slot = g['laser'] + drones * (2 if drone == 'drone_iris' else 1)
     return {'ship': ship, 'laser': {laser: max(1, int(round(slot * full)))},
             'shield': {shield: max(1, int(round(g['generators'] * full * 0.8)))}, 'speed': {}, 'drone': {drone: drones} if drones else {},
