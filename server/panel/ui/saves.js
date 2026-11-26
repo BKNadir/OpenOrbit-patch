@@ -257,6 +257,7 @@ function seNotes(notes) {
       n.refused ? 'info' : 'ok', 7000);
     else if (n.kind === 'design_all') toast(T('{0} of {1} drones done.', n.done, n.drones) + (n.made ? ' ' + T('{0} added from the catalog.', n.made) : ''), n.done ? 'ok' : 'info');
     else if (n.kind === 'level_many') toast(T('{0} items changed.', n.count), n.count ? 'ok' : 'info');
+    else if (n.kind === 'convert_points') toast(T('{0} pilot points converted.', n.done), 'ok');
   }
 }
 
@@ -634,6 +635,7 @@ function sePilot(v) {
           field(T('Experience (EP)'), numberBox(p.ep, x => op({ ep: x }), { max: 2 ** 62, cls: 'wide' })),
           field(T('Honor'), numberBox(p.honor, x => op({ honor: x }), { min: -1e12, max: 1e12, cls: 'wide' }))),
         h('div', { class: 'small dim', style: { marginTop: '8px' } }, p.next_level ? T('Next level at {0} EP.', fmtN(p.next_level)) : T('Highest level')))),
+    sePilotPoints(v),
     seCard(T('Company'), 'globe', h('p', { class: 'desc' }, T("When the company changes, the ship moves to the new company's home station.")), companies),
     seCard(T('Wallet'), 'star', h('div', { class: 'grid g2' }, currency('credits', T('Credits'), p.credits, [1e6, 1e7, 1e8]), currency('uridium', T('Uridium'), p.uridium, [1e4, 1e5, 1e6]))),
     seCard(T('Account'), 'info', h('div', { class: 'kv' },
@@ -641,6 +643,23 @@ function sePilot(v) {
       h('div', null, T('Play time'), h('b', null, fmtDur(p.play_sec))), h('div', null, T('Created'), h('b', null, fmtWhen(p.created))),
       h('div', null, T('Uridium bank'), h('b', null, fmtN(p.bank))), h('div', null, T('Quests'), h('b', null, T('{0} taken · {1} completed', v.quests.active, v.quests.done))))),
     seAdminCard());
+}
+
+// pilot points from log disks (save_editor.op_convert_points): the game's Exchange button stops at 50 points, the panel follows the
+// save's skill_points_max setting
+function sePilotPoints(v) {
+  const pp = v.pilot_points || {}, ro = v.read_only, full = pp.required < 0;
+  const go = n => seApply({ operation: 'convert_points', count: n });
+  return seCard(T('Pilot points'), 'star', h('div', { class: 'kv' },
+      h('div', null, T('Pilot points to spend'), h('b', null, fmtN(pp.points || 0))),
+      h('div', null, T('Converted'), h('b', null, fmtN(pp.converted || 0) + ' / ' + fmtN(pp.cap || 50))),
+      h('div', null, T('Log disks'), h('b', null, fmtN(pp.log_disks || 0))),
+      h('div', null, T('Next point'), h('b', null, full ? T('Limit reached') : T('{0} log disks', fmtN(pp.required))))),
+    h('div', { class: 'row', style: { gap: '8px', marginTop: '10px' } },
+      btn(T('Convert 1 point'), () => go(1), 'primary', 'plus', { disabled: ro || full || (pp.log_disks || 0) < pp.required }),
+      btn(T('Convert as many as possible'), () => go(1000), 'ghost', 'plus', { disabled: ro || full || (pp.log_disks || 0) < pp.required })),
+    h('div', { class: 'small muted', style: { marginTop: '6px' } },
+      T('Same price as in the game; the limit is the "Pilot points (most)" setting of this save. Press Save to write it.')));
 }
 
 // the save's admin settings (settings.py 'manager' group, kept in the save's settings.json): saved at once, not part of the editor's draft
