@@ -3505,6 +3505,8 @@
 "Attack them": "Атаковать их",
 "Clans without member limit": "Кланы без ограничения участников",
 "A clan can have any number of members (yours and the bot clans). When off, at most 50 members per clan, as in the game.": "В клане может быть сколько угодно участников (в твоём и в кланах ботов). Выключено: не больше 50 участников, как в игре.",
+"Moderator ships for players": "Корабли модератора для игроков",
+"Players can own and fly the moderator ships (Admin and Police). When off, only a save in admin mode can. Bots never get them.": "Игроки могут владеть кораблями модератора (Админ и Полиция) и летать на них. Выключено: только сохранение в режиме админа. Боты их никогда не получают.",
 "Gates to play (one after the other)": "Врата для прохождения (одни за другими)",
 "Play the list again and again (each gate built again within the build budget)": "Проходить список снова и снова (врата строятся заново в пределах бюджета постройки)",
 "Next gate: {0}.": "Следующие врата: {0}.",

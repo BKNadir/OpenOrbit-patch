@@ -22,6 +22,7 @@ import settings as SET
 BADGE = 6000                    # the client's admin rank (same as gm_console.ADMIN_RANK)
 SHIPS = (None, 'ship_admin', 'ship_police', 'ship_g-admincloak', 'ship_goliath_design_admincloak')
 CHAT_ROLE = 'admin'
+MOD_SHIPS = ('ship_admin', 'ship_police')     # the moderator ships that are real ships on the server (items.json)
 
 
 def _host():
@@ -80,6 +81,16 @@ def ship(profile=None):
     if not is_open(profile):
         return None
     return SHIPS[min(len(SHIPS) - 1, max(0, int(_setting(profile, 'admin_ship') or 0)))]
+
+
+def ship_allowed(profile, loot):
+    """Whether this player may own and fly this ship: the moderator ships (MOD_SHIPS) only for an admin, or for every player
+    with the server setting mod_ships_players. Bots (no profile) never."""
+    if loot not in MOD_SHIPS:
+        return True
+    if profile is None:
+        return False
+    return is_open(profile) or bool(SET.get('mod_ships_players'))
 
 
 def spectator(profile=None):

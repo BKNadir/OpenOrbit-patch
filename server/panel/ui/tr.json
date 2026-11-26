@@ -3505,6 +3505,8 @@
 "Attack them": "Onlara saldır",
 "Clans without member limit": "Üye sınırı olmayan klanlar",
 "A clan can have any number of members (yours and the bot clans). When off, at most 50 members per clan, as in the game.": "Bir klanın istediği kadar üyesi olabilir (seninki ve botların klanları). Kapalıyken: oyundaki gibi klan başına en fazla 50 üye.",
+"Moderator ships for players": "Oyuncular için moderatör gemileri",
+"Players can own and fly the moderator ships (Admin and Police). When off, only a save in admin mode can. Bots never get them.": "Oyuncular moderatör gemilerine (Admin ve Polis) sahip olup uçabilir. Kapalıyken yalnızca admin modundaki kayıt. Botlar bunları asla almaz.",
 "Gates to play (one after the other)": "Oynanacak kapılar (birbiri ardına)",
 "Play the list again and again (each gate built again within the build budget)": "Listeyi tekrar tekrar oyna (her kapı yapım bütçesi içinde yeniden kurulur)",
 "Next gate: {0}.": "Sıradaki kapı: {0}.",

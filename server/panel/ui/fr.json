@@ -3505,6 +3505,8 @@
 "Attack them": "Les attaquer",
 "Clans without member limit": "Clans sans limite de membres",
 "A clan can have any number of members (yours and the bot clans). When off, at most 50 members per clan, as in the game.": "Un clan peut avoir autant de membres que voulu (le tien et ceux des bots). Désactivé : 50 membres au maximum par clan, comme dans le jeu.",
+"Moderator ships for players": "Vaisseaux modérateur pour les joueurs",
+"Players can own and fly the moderator ships (Admin and Police). When off, only a save in admin mode can. Bots never get them.": "Les joueurs peuvent posséder et piloter les vaisseaux modérateur (Admin et Police). Désactivé : seule une sauvegarde en mode admin le peut. Les bots ne les ont jamais.",
 "Gates to play (one after the other)": "Portails à jouer (l'un après l'autre)",
 "Play the list again and again (each gate built again within the build budget)": "Rejouer la liste en boucle (chaque portail reconstruit dans la limite du budget de construction)",
 "Next gate: {0}.": "Portail suivant : {0}.",
