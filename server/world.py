@@ -571,6 +571,7 @@ class World:
             return
         if self.npcs:       # the movement of an NPC out of view does not go to the client (it does not know it)
             msgs = [m for m in msgs if not (m[0] == 'MoveCommand' and m[1]['userId'] in self.npcs and m[1]['userId'] not in self.visible)]
+        msgs = self.drop_looks(msgs)
         pets = self.__dict__.get('bot_pets')
         if pets:                # a bot's P.E.T. goes with its ship (bot/pet.py; even when the ship has already left npcs)
             from bot import pet as BP
@@ -613,6 +614,41 @@ class World:
         else:
             return True
         return uid in (0, self.hid, self.target, self.last_target) or self.own_pet(uid)
+
+    @staticmethod
+    def _look_key(v):
+        return (v.get('userId'), v.get('modifier'), v.get('attribute'), v.get('additionalAttribute'))
+
+    def drop_looks(self, msgs):
+        """Switches a ship's running looks (VisualModifierCommand still on in the client) off before the ship goes.
+
+        The client keeps such a look (Fortify's ship_fortify_3D armor, from its object pool) when the ship is removed with it still on, and
+        the leftover shows up on another ship later: a Citadel's armor on aliens and bots (user report 2026-11-26, client.log: a Citadel bot
+        shown with Fortify on, ship_fortify_3D taken from the pool). Kept per unit from what goes to the client: VisualModifierCommand on/off
+        and the modifier list of ShipCreateCommand."""
+        on = self.__dict__.setdefault('client_looks', {})
+        out = []
+        for m in msgs:
+            name, f = m[0], m[1]
+            if name == 'VisualModifierCommand' and isinstance(f, dict):
+                looks = on.setdefault(f.get('userId'), {})
+                if f.get('activated'):
+                    looks[self._look_key(f)] = f
+                else:
+                    looks.pop(self._look_key(f), None)
+            elif name == 'ShipCreateCommand' and isinstance(f, dict):
+                uid = f.get('userId')
+                new = {self._look_key(v): {k: x for k, x in v.items() if k != '_'} for v in f.get('modifier') or ()
+                       if isinstance(v, dict) and v.get('activated')}
+                old = on.get(uid) or {}
+                out += [('VisualModifierCommand', dict(v, activated=False)) for k, v in old.items() if k not in new]
+                on[uid] = new
+            elif name == 'ShipRemoveCommand' and isinstance(f, dict):
+                looks = on.pop(f.get('userId'), None)
+                if looks:
+                    out += [('VisualModifierCommand', dict(v, activated=False)) for v in looks.values()]
+            out.append(m)
+        return out
 
     def hero_miss(self, m):
         """A miss on the hero's own ship is pink like the damage it takes (HERO_MISS_COLOR; player report 2026-11-04: it was red); the
@@ -1023,6 +1059,7 @@ class World:
         """All NPCs within view distance (on login and when the map is reloaded)."""
         self.visible.clear()
         self.__dict__.pop('bot_pets', None)          # the reloaded map shows them anew
+        self.__dict__.pop('client_looks', None)
         hx, hy = self.hero_pos(now)
         return [m for n in self.npcs.values() if self.in_view(n, now, hx, hy) for m in self.show(n, now)]
 
