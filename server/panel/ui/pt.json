@@ -1196,6 +1196,7 @@
 "Impressions of people": "Impressões sobre as pessoas",
 "Impulsive": "Impulsivo",
 "In Advanced mode bots speak English only (the language model is weak in other languages).": "No modo Avançado os bots falam apenas inglês (o modelo de linguagem é fraco em outros idiomas).",
+"With the built-in language model, bots chat in English, French, German, Spanish or Portuguese; the other languages fall back to English.": "Com o modelo de linguagem integrado, os bots conversam em inglês, francês, alemão, espanhol ou português; as outras línguas passam para inglês.",
 "In Advanced mode, bots talk using the language model; if the model can't keep up, the Normal mode chat takes over.": "No modo Avançado, os bots falam com o modelo de linguagem; se o modelo não acompanhar, o chat do modo Normal assume.",
 "In Normal mode, bots read what is written and answer like real players: game questions with real game knowledge, personal questions with their own lasting story, each in their own typing style. They also talk to each other, greet, and reply to calls for help and whispers.": "No modo Normal, os bots leem o que é escrito e respondem como jogadores reais: perguntas do jogo com conhecimento real do jogo, perguntas pessoais com a sua própria história, sempre a mesma, cada um com o seu jeito de escrever. Também falam entre si, cumprimentam e respondem a pedidos de ajuda e sussurros.",
 "In Quests mode the quest picks the aliens; the stars still say which ones go first.": "No modo Missões a missão escolhe os alienígenas; as estrelas ainda dizem quais vêm primeiro.",

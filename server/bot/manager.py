@@ -132,8 +132,8 @@ class Manager(ChatEngine):
                 new_.append(k)
             else:
                 k.update(name=roster_row['name'], company=roster_row['company'], personality=roster_row['personality'])      # the name may have been changed in the panel
-            if self.mode == 'advanced' and not multilingual:
-                k['personality'] = dict(k['personality'], lang='en')      # the built-in language model is English only (llm.py; free with other providers)
+            if self.mode == 'advanced' and not multilingual and not PRV.speaks(k['personality'].get('lang', 'en')):
+                k['personality'] = dict(k['personality'], lang='en')      # a language the built-in model writes badly: English (llm_provider.LOCAL_LANGS)
             try:
                 b = Bot(k)
             except Exception as e:                       # one broken record (hand edit, old format) must not keep the whole pack away

@@ -1196,6 +1196,7 @@
 "Impressions of people": "Впечатления о людях",
 "Impulsive": "Импульсивный",
 "In Advanced mode bots speak English only (the language model is weak in other languages).": "В Продвинутом режиме боты говорят только по-английски (языковая модель слабо знает другие языки).",
+"With the built-in language model, bots chat in English, French, German, Spanish or Portuguese; the other languages fall back to English.": "Со встроенной языковой моделью боты общаются на английском, французском, немецком, испанском или португальском; остальные языки заменяются английским.",
 "In Advanced mode, bots talk using the language model; if the model can't keep up, the Normal mode chat takes over.": "В расширенном режиме боты говорят через языковую модель; если модель не успевает, общение берёт на себя обычный режим.",
 "In Normal mode, bots read what is written and answer like real players: game questions with real game knowledge, personal questions with their own lasting story, each in their own typing style. They also talk to each other, greet, and reply to calls for help and whispers.": "В обычном режиме боты читают написанное и отвечают как настоящие игроки: на вопросы об игре — с настоящим знанием игры, на личные — своей неизменной историей, каждый в своей манере письма. Они также общаются друг с другом, здороваются и отвечают на просьбы о помощи и личные сообщения.",
 "In Quests mode the quest picks the aliens; the stars still say which ones go first.": "В режиме заданий пришельцев выбирает задание; звёзды по-прежнему задают, кто идёт первым.",

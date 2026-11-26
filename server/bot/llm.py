@@ -565,7 +565,8 @@ class Brain:
         self.slot = int(y.setting('llm_batch', 4) or 4)
         global MULTILINGUAL, STRONG
         self.server = PRV.client(self.slot, log)              # the built-in model or the user's provider
-        MULTILINGUAL = STRONG = not isinstance(self.server, LS.Server)
+        STRONG = not isinstance(self.server, LS.Server)
+        MULTILINGUAL = True              # each bot in its own language (the built-in model: LOCAL_LANGS, the others were set to English on load)
         self.ready = False
         self.queue = []
         self.counter = itertools.count()

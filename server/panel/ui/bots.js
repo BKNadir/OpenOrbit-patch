@@ -231,8 +231,10 @@ function btNameSource(value, onchange) {
   return h('select', { class: 'input', onchange: e => onchange(e.target.value) },
     [['production', T('Generated')], ['dostats', T('DOStats (real players)')]].map(([v, name]) => h('option', { value: v, selected: v === value }, name)));
 }
-// the built-in language model is English only; if another provider is chosen the language is free in Advanced mode too (bot/llm_provider.py)
-const btLangLocked = mode => mode === 'advanced' && !BT.entries?.llm_multilingual;
+// the built-in language model writes a few languages well (bot/llm_provider.py LOCAL_LANGS), another provider all of them: the choice is
+// free, a note tells which languages fall back to English
+const btLangLocked = () => false;
+const btLangNote = mode => mode === 'advanced' && !BT.entries?.llm_multilingual ? h('div', { class: 'small muted' }, T('With the built-in language model, bots chat in English, French, German, Spanish or Portuguese; the other languages fall back to English.')) : null;
 function btChatLang(mode, value, onchange) {
   return btLangLocked(mode) ? btPickLang('en', () => {}, T("Each bot in its name's language"), true) : btPickLang(value, onchange, T("Each bot in its name's language"));
 }
@@ -257,8 +259,8 @@ function btStep3(w, render) {
     field(T('Name source'), btNameSource(w.name_source, v => { w.name_source = v; }),
       h('div', { class: 'small muted' }, T(BT_NAME_SOURCE_DESCRIPTION))),
     field(T('Chat language'), btChatLang(w.mode, w.lang, v => { w.lang = v; }),
-      h('div', { class: 'small muted' }, btLangLocked(w.mode) ? T('In Advanced mode bots speak English only (the language model is weak in other languages).')
-        : T('The language bots use in chat. With "Each bot in its name\'s language", a bot with a German name speaks German.'))),
+      h('div', { class: 'small muted' }, T('The language bots use in chat. With "Each bot in its name\'s language", a bot with a German name speaks German.')),
+      btLangNote(w.mode)),
     field(T('Your own bots (optional)'), btCustomField(w.special, v => { w.special = v; })));
 }
 
@@ -407,7 +409,7 @@ function btRoster(d) {
       btRow(T('Name language'), T('Applies to newly added bots and to regeneration; existing bots keep their names.'),
         btPickLang(nameLang, v => { nameLang = v; }, T('Mixed'))),
       btRow(T('Name source'), T(BT_NAME_SOURCE_DESCRIPTION), btNameSource(nameSource, v => { nameSource = v; })),
-      btRow(T('Chat language'), btLangLocked(d.mode) ? T('In Advanced mode bots speak English only (the language model is weak in other languages).')
+      btRow(T('Chat language'), d.mode === 'advanced' && !BT.entries?.llm_multilingual ? T('After Apply, all bots speak this language.') + ' ' + T('With the built-in language model, bots chat in English, French, German, Spanish or Portuguese; the other languages fall back to English.')
         : T('After Apply, all bots speak this language.'), btChatLang(d.mode, lang, v => { lang = v; })),
       field(T('Your own bots'), btCustomField('', v => { special = v; }), h('div', { class: 'small muted' }, T('Apply: names not in the roster are added as new bots. Regenerate: they come first in the roster.'))),
       h('div', { class: 'row wrap', style: { justifyContent: 'flex-end' } },
