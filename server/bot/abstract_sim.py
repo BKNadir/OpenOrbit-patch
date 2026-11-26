@@ -111,6 +111,11 @@ def farm(bot, dt, y, target_kind=None):
     from . import playstyle as PL
     efficiency *= PL.combat_efficiency(bot)                  # skill (combat, focus), the day's form, habits
     k = dt / 3600.0 * speed * efficiency
+    from . import palladium as PD
+    palladium = bot.game_map in PD.FIELDS and not (y is not None and y.mode == 'simple') and PD.wants(bot)     # simple mode: no trade trips
+    if palladium:                                             # Palladium for free gate energy (part of the time: fewer kills); picking up
+        PD.collect(bot, dt / 3600.0 * speed * (1 - 0.35 * bot.mood['fatigue']))        # is not combat: only tiredness slows it
+        k *= 1 - PD.COLLECT_SHARE
     kills = r['kills']
     if target_kind and target_kind in kills:
         kills = {target_kind: kills[target_kind] * 1.6}      # chases only what it wants: more of that type
@@ -139,7 +144,7 @@ def farm(bot, dt, y, target_kind=None):
             bot.ist('npc_points', TB.npc_rank_points(tip) * n)
             from . import loot as LT
             LT.extra_loot(bot, tip, n)                   # Scrapium, Mucosum, the daily file ...
-            if bot.permission.get('cargo', True):             # cargo boxes: a patient player collects all, an impatient one leaves most
+            if bot.permission.get('cargo', True) and not palladium:     # cargo boxes (a Palladium collector keeps its hold for Palladium): a patient player collects all, an impatient one leaves most
                 take = (0.55 + 0.4 * bot.o('patience')) * bot.game_settings.multiplier('collecting', 'cargo') * (1 + LT.booster_share(bot, 'COLLECT_RESOURCES')) \
                     * PL.cargo_care(bot)                 # many pilots leave most ore boxes, an ore trader takes them all (playstyle.py)
                 bot.add_cargo({t: int(v * n * take) for t, v in K.npc_cargo(tip, bot.level, bot.game_map).items()})
