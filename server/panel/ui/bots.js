@@ -58,7 +58,7 @@ const BT_PERMS = {
   modes: [N('Event and PvE modes'), N('Event gates, Voyagers, Trinity, Astral, Black Light, Echoes, LoW, Vortex, Mimesis, World Boss, Apotheosis, Labyrinth; Dispatch and Galaxy Trek. They enter the modes they can handle and are rewarded for how far they get.')],
   box_stealing: [N('Cargo stealing'), N("Rude bots now and then collect someone else's cargo box (yours too); if it belongs to their own company they lose honor.")],
 };
-const BT_CLASS_NAME = s => s === '4-X' ? '4-1…4-4' : s;
+const BT_CLASS_NAME = s => ({ '4-X': '4-1…4-4', '5-X': '5-1…5-3', BL: 'BL-1…BL-3' })[s] || s;
 const btFill = (el, ...k) => el.replaceChildren(...k.flat(Infinity).filter(x => x != null && x !== false));
 const btCompany = ['MMO', 'EIC', 'VRU'];
 function btArt(name, backup, cls = 'bt-art') {         // if the image has not arrived (Orders.md), an existing image
@@ -146,7 +146,7 @@ function btWizard() {
   const r = BT.entries;
   const w = { name: '', description: '', world: (r.worlds.find(d => !r.entries.some(p => p.world === d.id)) || r.worlds[0] || {}).id || null, mode: 'normal',
     progression: 'progressive', count: 80, lang: 'mixed', name_lang: 'mixed', name_source: 'production', company_distribution: [1, 1, 1], special: '', settings: { jumpstart_hours: 60, simple_power: 1, simple_friendly: 0.5,
-      simple_maps: { 'X-1': 2, 'X-2': 2, 'X-3': 2, 'X-4': 2, '4-X': 3, 'X-5': 1, 'X-6': 1, 'X-7': 1, 'X-8': 1, '4-5': 2 } } };
+      simple_maps: { 'X-1': 2, 'X-2': 2, 'X-3': 2, 'X-4': 2, '4-X': 3, 'X-5': 1, 'X-6': 1, 'X-7': 1, 'X-8': 1, '4-5': 2, '5-X': 1, BL: 1 } } };
   let step = 0;
   const body = h('div', { class: 'stack', style: { gap: '14px' } });
   const footer = h('div', { class: 'row', style: { gap: '8px', justifyContent: 'flex-end', width: '100%' } });

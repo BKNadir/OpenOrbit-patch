@@ -18,8 +18,9 @@ ITEMS = DATA.shared('items.json')              # read only (audit 2026-11-22: st
 NPC = DATA.load('npc.json')
 COMBAT = NPC['combat']
 
-# maps the bots roam: X-1..X-8, 4-1..4-5 (pirate maps need a key, gates and mode maps need a ticket)
-MAPS = tuple(range(1, 30))
+# maps the bots roam: X-1..X-8, 4-1..4-5, the pirate maps 5-1..5-3 (from 4-5) and Black Light BL-1..BL-3 (from X-8); not 5-4 (Silver
+# Booty Key), gates and mode maps (ticket)
+MAPS = tuple(range(1, 30)) + (91, 92, 93) + (306, 307, 308)
 LASER_INTERVAL = COMBAT['laser_interval_sec']
 NPC_INTERVAL = COMBAT['npc_attack_interval_sec']
 SEARCH_SEC = 9.0             # searching for a target and approaching between two aliens (observed: 6-12 s on 1-x)
