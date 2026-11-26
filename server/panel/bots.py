@@ -62,7 +62,7 @@ SETTINGS = {
     'llm_hourly': ('full', 0, 20000, 200),             # hourly limit for all language model requests (0: unlimited)
 }
 PERMISSIONS = ('shop', 'quest', 'pvp', 'attack_player', 'chat', 'clan', 'clan_found', 'friend', 'group', 'auction', 'assist', 'box_stealing', 'cargo', 'rocket', 'custom_ammunition', 'extras', 'mine', 'lab', 'skylab', 'technology', 'booty', 'assembly', 'gate', 'event', 'modes', 'clan_diplomacy', 'clan_order', 'gate_filler', 'clan_cbs', 'abilities')
-SIMPLE_CLASSES = ('X-1', 'X-2', 'X-3', 'X-4', '4-X', 'X-5', 'X-6', 'X-7', 'X-8', '4-5')
+SIMPLE_CLASSES = ('X-1', 'X-2', 'X-3', 'X-4', '4-X', 'X-5', 'X-6', 'X-7', 'X-8', '4-5', '5-X', 'BL')
 
 
 class BotError(ValueError):
