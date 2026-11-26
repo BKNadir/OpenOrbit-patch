@@ -95,6 +95,8 @@ def map_candidates(bot, value, y=None):
     foreign = y.setting('foreign_map', True) if y is not None else True
     out = []
     lv, company = bot.level, bot.company
+    from . import palladium as PD
+    palladium = PD.wants(bot)
     for m in K.MAPS:
         if not K.can_enter(m, company, lv):
             continue
@@ -106,6 +108,9 @@ def map_candidates(bot, value, y=None):
             continue
         earnings = (r['ep_per_hour'] * (0.6 + o['ambition']) / 10.0 + r['credits_per_hour'] * (0.5 + o['frugality']) / 10.0
                   + r['uridium_per_hour'] * 25.0 + r['honor_per_hour'] * 5.0) * S.x1_cut(bot, m)    # own X-1 pays less from level 7
+        if m in PD.FIELDS and palladium:
+            # Palladium for free gate energy (bot/palladium.py): part of the time collecting, valued as the uridium the energy saves
+            earnings = earnings * (1 - PD.COLLECT_SHARE) + PD.per_hour(bot, m) * PD.COLLECT_SHARE * PD.value_u(bot) * 25.0
         risk = r['deaths_per_hour'] * (1.6 - o['risk']) * 0.35
         route = K.route(bot.game_map, m, company, lv)
         if route is None:
@@ -120,6 +125,13 @@ def map_candidates(bot, value, y=None):
         utility = (earnings / 1000.0) * preference * (1 - min(0.9, risk)) / (1 + 0.04 * max(0, crowd)) - jump * 0.03 * (1.2 - o['patience'])
         utility *= PL.map_bias(bot, m, y.now if y is not None else time.time())      # misjudging (map knowledge), favourite map, habits
         out.append((utility, m, r))
+    if palladium and out:
+        # Palladium for free gates (user request 2026-11-26): its worth in uridium is small next to grinding, but a pilot who wants gates
+        # goes for it: 5-1/5-3 gain a share of the best map's utility (by ambition), shared out by the crowd like any map
+        best = max(u for u, _, _ in out)
+        crowd = (lambda m: len(y.on_map.get(m, ())) - (1 if m == bot.game_map else 0)) if y is not None else (lambda m: 0)
+        out = [(u + PD.pull(bot) * max(0.0, best) * PD.FIELDS[m] / max(PD.FIELDS.values()) / (1 + 0.04 * max(0, crowd(m)))
+                if m in PD.FIELDS else u, m, r) for u, m, r in out]
     pull = {m: event_pull(bot, m, y.now if y is not None else time.time()) for _, m, _ in out}
     if any(v > 1.0 for v in pull.values()):
         # an open-map event draws who it fits: a share of the best map's utility on top (the event map's own aliens may pay little;

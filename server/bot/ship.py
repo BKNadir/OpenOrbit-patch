@@ -1590,6 +1590,8 @@ def go_hunt(w, n, now):
     nx, ny = n.mover.pos(now)
     if collect_box(w, n, now):
         return
+    if collect_palladium(w, n, now):
+        return
     types = _killable(b, w.map_id)
     wanted = b.plan.get('tip')
     rude = random.random() < 0.15 * b.o('aggression') * (1 - b.o('helpfulness'))
@@ -1794,6 +1796,8 @@ def collect_box(w, n, now):
     nx, ny = n.mover.pos(now)
     own = ('b', n.id)
     decision = n.__dict__.setdefault('stealing', {})
+    from . import palladium as PD
+    palladium = w.map_id in PD.FIELDS and PD.wants(b)
     en, best_score = None, 900.0 * PL.box_factor(b) ** 0.7       # a box hunter sees boxes from far away (playstyle.py)
     for h, k in w.boxes.items():
         tip = k.get('tip')
@@ -1809,8 +1813,8 @@ def collect_box(w, n, now):
                 continue
         elif k.get('owner') is not None or (tip != 'BONUS_BOX' and tip not in WD.CARGO_BOXES):
             continue
-        if tip in WD.CARGO_BOXES and not k.get('event') and (not b.permission.get('cargo', True) or b.cargo_fill() >= 1):
-            continue                                   # cargo off or full
+        if tip in WD.CARGO_BOXES and not k.get('event') and (not b.permission.get('cargo', True) or b.cargo_fill() >= 1 or palladium):
+            continue                                   # cargo off or full; a Palladium collector keeps its hold for Palladium
         owner_tag = k.get('owner_tag')
         if tip in WD.CARGO_BOXES and owner_tag is not None and tuple(owner_tag) != own and WD.SET.get('cargo_ownership'):
             if h not in decision:                         # someone else's cargo: a rude bot takes it now and then (one decision per box)
@@ -1872,6 +1876,37 @@ def collect_box(w, n, now):
         b.reward('box', ep=random.randint(0, 100), credits=random.choice((0, 0, 100, 500, 1000)), uridium=random.choice((0, 0, 10, 20, 50, 100)))
         b.ist('box')
     n.next_think = now + random.uniform(0.3, 1.0)
+    return True
+
+
+def collect_palladium(w, n, now):
+    """On 5-1 and 5-3 a bot that wants gate energy (bot/palladium.py) picks up the Palladium of the fog field in turns with hunting,
+    like a player: the piece disappears for everyone and grows back as for the player (world.finish_harvest) -> is it busy with this."""
+    from . import palladium as PD
+    b = n.bot
+    if w.map_id not in PD.FIELDS or int(now // PD.COLLECT_PHASE_SEC) % 2 or b.cargo_fill() >= 1 or not PD.wants(b):
+        return False
+    nx, ny = n.mover.pos(now)
+    en, best = None, 1e18
+    for h, o in list(getattr(w, 'ores', {}).items()):
+        if o.get('busy') or int(o.get('tip', -1)) != PD.PALLADIUM:
+            continue
+        d = math.hypot(o['x'] - nx, o['y'] - ny)
+        if d < best:
+            en, best = h, d
+    if en is None:
+        return False
+    o = w.ores[en]
+    if best > 60:
+        _go_to(w, n, o['x'], o['y'], now, threshold=40)
+        return True
+    del w.ores[en]
+    w.send([('RemoveCollectableCommand', {'collected': False, 'hash': en})])
+    w.schedule(random.uniform(*WD.ORE['respawn_sec']) * WD.SET.multiplier('ore_respawn'), 'ore', o['tip'])
+    got = b.add_cargo({PD.PALLADIUM: max(1, int(round(b.game_settings.multiplier('collecting', 'ore'))))}).get(PD.PALLADIUM, 0)
+    if got:
+        b.ist('palladium', got)
+    n.next_think = now + WD.ORE['harvest_sec'] + random.uniform(0.2, 0.6)
     return True
 
 
