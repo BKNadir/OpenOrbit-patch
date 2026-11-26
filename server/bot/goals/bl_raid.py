@@ -22,26 +22,6 @@ def _lobby(y, company):
     return y.__dict__.setdefault('bl_lobby', {}).setdefault(company, {})
 
 
-def _form_group(y, leader, members, now):
-    """A real in-game group (group.py) for the raid: the leader invites, the others accept at once (they came for it)."""
-    import group as GR
-    import community as TP
-    from .. import society as SO
-    for o in members:
-        if GR.group_of(o.uid) is not None and GR.group_of(o.uid) is not GR.group_of(leader.uid):
-            GR.handle(SO.person(o), 'LeaveGroupRequest', {})
-    for o in members:
-        if o is leader or GR.group_of(o.uid) is not None or TP.find(uid=o.uid) is None:
-            continue
-        g = GR.group_of(leader.uid)
-        if g is not None and len(g.members) >= BLK.TEAM_MAX:
-            break
-        GR.handle(SO.person(leader), 'GroupInvitationRequest', {'candidateId': o.uid})
-        GR.handle(SO.person(o), 'InvitationAcceptRequest', {'inviterId': leader.uid})
-    for o in members:
-        o.party_until = now + RAID_SEC[1]              # society.party does not break the raid group up early
-
-
 @target
 class BlacklightRaid(Goal):
     name = 'bl_raid'
@@ -81,8 +61,8 @@ class BlacklightRaid(Goal):
             if len(here) >= FULL_TEAM or (len(here) >= BLK.RAID_MIN and waited >= WAIT_SEC):
                 here.sort(key=lambda o: (-o.level, o.uid))
                 leader, party = here[0], here[:BLK.TEAM_MAX]
-                _form_group(y, leader, party, now)
                 end = now + bot.r.uniform(*RAID_SEC)
+                BLK.form_group(y, leader, party, now, end)
                 for o in party:
                     lobby.pop(o.uid, None)
                     o.plan.update(phase='raid', map=BLK.BL_MAP[o.company], until=end, leader=leader.uid,
