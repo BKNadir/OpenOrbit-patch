@@ -15,6 +15,7 @@ directory, clan, group, whisper, mail, ranking and auction see them on their own
 """
 import os, random, re, time
 
+import admin_mode as YM
 import player_profile as PF
 import paths as PTH
 from . import name_style as NS
@@ -696,6 +697,8 @@ def lot_importance(b, lot):
     from . import extras as EX
     loot = lot['loot']
     if loot.startswith('ship_'):
+        if loot in YM.MOD_SHIPS:
+            return 0                                     # bots never fly the moderator ships
         g, current = K.ITEMS['ships'].get(loot) or {}, K.ITEMS['ships'].get(b.k['gear']['ship']) or {}
         # only those with values and better than the current one (designs that are only appearance, "goliath_design_jade", are not ships)
         if not g.get('hp') or g['hp'] + 20000 * (g['laser'] + g['generators']) <= current.get('hp', 0) + 20000 * (

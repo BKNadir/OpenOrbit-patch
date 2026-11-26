@@ -270,6 +270,9 @@ SCHEMA = [
                                                          'Boss" announcement and sound (3, 6, 10, 15 kills; at most 10 s apart).'),
     _b('no_ads', 'Hide login pop-ups', 'ui', 'The daily bonus, tip and Season Pass windows that open at login are not sent (you can still open '
                                              'them from the menus).', apply_mode='login'),
+    # the moderator ships (admin_mode.MOD_SHIPS) for every player: a world rule, shown with the world settings
+    _b('mod_ships_players', 'Moderator ships for players', 'world', 'Players can own and fly the moderator ships (Admin and Police). When off, '
+                                                                    'only a save in admin mode can. Bots never get them.', apply_mode='login', default=False),
     # ---------------------------------------------------------------- admin (admin_mode.py)
     _b('admin_mode', 'Admin mode', 'manager', 'You become an administrator in the game: an admin badge (yellow A) before your name, and you are '
                                               'left out of the rank system, the Hall of Fame rankings and the company ranking. Bots know you as an '

@@ -393,4 +393,3 @@ body.se-busy .se-main { opacity: .75; transition: opacity .2s .15s; pointer-even
 /* Statistics tab (keIstatistik) */
 .se-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px 24px; margin-bottom: 10px; }
 .se-stats .row { gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line, rgba(255,255,255,.06)); }
-

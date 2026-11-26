@@ -14,6 +14,7 @@ Persistent record (k):
 """
 import random, time
 
+import admin_mode as YM
 import player_profile as PF
 from . import catalog as K
 from . import personality as PS
@@ -208,8 +209,8 @@ class Bot:
         """A purchased or earned item goes to the equipment (ship: becomes the active ship)."""
         e = self.k['gear']
         if loot.startswith('ship_'):
-            if not (K.ITEMS['ships'].get(loot) or {}).get('hp'):
-                return False                             # a design that is only a look: not a ship
+            if not (K.ITEMS['ships'].get(loot) or {}).get('hp') or loot in YM.MOD_SHIPS:
+                return False                             # a design that is only a look: not a ship; bots never fly the moderator ships
             e['ship'] = loot
         elif loot in K.ITEMS['lasers']:
             e['laser'][loot] = e['laser'].get(loot, 0) + n
