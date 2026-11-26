@@ -1074,7 +1074,9 @@ def can_attack_player(w, n, o, now):
     if now < o.invuln_until or o.invulnerable or o.hero_effects.invulnerable(now):
         return False
     if OS.protected(o, now, chased=_chasing(n, o.hid, now)) or relation(o, n.bot) in (1, 2):
-        return False                                     # the pilot's DMZ (player_combat.protected); its clan is an ally or in non-aggression
+        return False
+    if n.bot.k.get('clan') and int(o.p.d['pilot'].get('clanId') or 0) == int(n.bot.k['clan']):
+        return False                                     # a member of its own clan, whatever its company                                     # the pilot's DMZ (player_combat.protected); its clan is an ally or in non-aggression
     return int(o.p.d['pilot'].get('factionId') or 0) != n.bot.company or not (
         H.company(w.map_id) == n.bot.company and H.name(w.map_id).split('-')[-1] in ('1', '2'))
 

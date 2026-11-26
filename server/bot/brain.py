@@ -139,6 +139,11 @@ def map_candidates(bot, value, y=None):
         best = max(u for u, _, _ in out)
         few = lambda m: max(0, BLK.PIRATE_FEW - len(y.on_map.get(m, ())) + (1 if m == bot.game_map else 0)) / BLK.PIRATE_FEW
         out = [(u + (0.5 + 0.4 * o['risk']) * max(0.0, best) * few(m) if m in BLK.PIRATE_MAPS else u, m, r) for u, m, r in out]
+    if out and y is not None and bot.k.get('clan'):
+        # clan mates draw each other (user request 2026-11-26), whatever their company, most on the pirate maps where every company meets
+        from . import society as SO, blacklight as BLK
+        mates = lambda m: sum(1 for x in y.on_map.get(m, ()) if x is not bot and SO.same_clan(bot, x))
+        out = [(u * (1 + (0.16 if m in BLK.PIRATE_MAPS else 0.08) * min(4, mates(m))) if u > 0 else u, m, r) for u, m, r in out]
     pull = {m: event_pull(bot, m, y.now if y is not None else time.time()) for _, m, _ in out}
     if any(v > 1.0 for v in pull.values()):
         # an open-map event draws who it fits: a share of the best map's utility on top (the event map's own aliens may pay little;

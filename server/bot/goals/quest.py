@@ -170,12 +170,14 @@ def _pirate_group(bot, m, y, now):
     import group as GR
     if y is None or int(m) not in BLK.PIRATE_MAPS or GR.group_of(bot.uid) is not None or not bot.permission.get('group', True):
         return
-    cands = [o for o in y.bots if o is not bot and o.online and o.company == bot.company and o.dead_until <= now and abs(o.level - bot.level) <= 6
-             and GR.group_of(o.uid) is None and o.target is not None and o.target.name in ('grinding', 'quest')
+    from .. import society as SO
+    cands = [o for o in y.bots if o is not bot and o.online and (o.company == bot.company or SO.same_clan(bot, o)) and o.dead_until <= now
+             and abs(o.level - bot.level) <= 6 and GR.group_of(o.uid) is None and o.target is not None and o.target.name in ('grinding', 'quest')
              and K.can_enter(int(m), o.company, o.level)]
     if not cands:
         return
-    cands.sort(key=lambda o: (o.game_map != int(m), -bot.memory.relation(o.name, now)))
+    # its clan first, whatever the company (the pirate maps belong to no company), then who is already there and who it knows
+    cands.sort(key=lambda o: (not SO.same_clan(bot, o), o.game_map != int(m), -bot.memory.relation(o.name, now)))
     party = [bot] + cands[:3]
     until = now + bot.r.uniform(40 * 60, 90 * 60)
     BLK.form_group(y, bot, party, now, until)
