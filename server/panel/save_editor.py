@@ -343,14 +343,15 @@ def rng_record(p, i, l):
 
 
 def stats(pr):
-    """Statistics tab (read-only; player request 2026-10-30): the parts of the rank points, alien and player kills, deaths,
-    gates (completion and times: galaxy_gates.record_duration), the best of the modes."""
+    """Statistics tab (player request 2026-10-30; editable since 2026-11-26: op_stats): the parts of the rank points, alien and player
+    kills, deaths, gates (completion and times: galaxy_gates.record_duration), the best of the modes. Rows carry their key (the last
+    field) for editing; npc_names / ship_names list what can be added."""
     import ranks as RT
     import galaxy_gates as GT
     c = RT.counters(pr)
-    npc = sorted(([RT.R['npc_points'].get(k, {}).get('name', '#' + k).strip(), int(n), RT.R['npc_points'].get(k, {}).get('points', 0)]
+    npc = sorted(([RT.R['npc_points'].get(k, {}).get('name', '#' + k).strip(), int(n), RT.R['npc_points'].get(k, {}).get('points', 0), k]
                   for k, n in c['npc'].items() if n), key=lambda x: -x[1])
-    player = sorted(([RT.R['ship_points'].get(k, {}).get('name', k.replace('ship_', '')), int(n)] for k, n in c['player'].items() if n),
+    player = sorted(([RT.R['ship_points'].get(k, {}).get('name', k.replace('ship_', '')), int(n), k] for k, n in c['player'].items() if n),
                     key=lambda x: -x[1])
     roster_row = (pr.d.get('gates') or {}).get('gates') or {}
     duration = pr.d.get('gate_times') or {}
@@ -362,7 +363,65 @@ def stats(pr):
             'quest': c['quest'], 'friendly': c['friendly'], 'gates': gates,
             'modes': {'ebl': int((pve.get('ebl') or {}).get('best', 0)), 'labyrinth': int((pr.d.get('labyrinth') or {}).get('hunts', 0)),
                        'mimesis': int(max((pr.d.get('mimesis') or {}).get('trips') or [0]))},
-            'play_sec': int(pr.d.get('play_sec') or 0)}
+            'play_sec': int(pr.d.get('play_sec') or 0), 'phoenix': int(c.get('phoenix', 0)),
+            'npc_names': sorted(([k, v.get('name', '#' + k).strip()] for k, v in RT.R['npc_points'].items()), key=lambda x: x[1].lower()),
+            'ship_names': sorted(([k, v.get('name', k)] for k, v in RT.R['ship_points'].items()), key=lambda x: x[1].lower()),
+            'gate_names': [[k, GT.GATES[k]['name']] for k in GT.GATES]}
+
+
+STAT_COUNTERS = ('death_by_enemy', 'death_by_radiation', 'death_other', 'quest', 'friendly', 'phoenix')
+
+
+def op_stats(pr, m, o):
+    """Statistics (user request 2026-11-26: the tab was read-only): the counters behind the rank points, alien and player kills by kind,
+    a gate's completions and times, the modes' best, the play time and the days since registration. Every value is a number >= 0;
+    a kill count of 0 removes the row."""
+    import ranks as RT
+    import galaxy_gates as GT
+    c = RT.counters(pr)
+    for k in STAT_COUNTERS:
+        if k in o:
+            c[k] = _int(o[k], 0, 10 ** 9)
+    for key, book, table in (('npc', 'npc', RT.R['npc_points']), ('player', 'player', RT.R['ship_points'])):
+        for k, n in (o.get(key) or {}).items():
+            k = str(k)
+            if k not in table:
+                raise ValueError('Unknown kind: %s' % k)
+            n = _int(n, 0, 10 ** 9)
+            if n:
+                c[book][k] = n
+            else:
+                c[book].pop(k, None)
+    g = o.get('gate')
+    if g:
+        k = str(g.get('key'))
+        if k not in GT.GATES:
+            raise ValueError('Unknown gate: %s' % k)
+        if 'done' in g:
+            row = pr.d.setdefault('gates', {}).setdefault('gates', {})
+            row.setdefault(k, GT.fresh(GT.GATES[k]))['done'] = _int(g['done'], 0, 10 ** 6)
+        if 'best' in g or 'last' in g:
+            t = pr.d.setdefault('gate_times', {}).setdefault(k, {'best': 0, 'last': 0, 'number': 0})
+            for f in ('best', 'last'):
+                if f in g:
+                    t[f] = _int(g[f], 0, 10 ** 7)
+    if 'ebl' in o:
+        pr.d.setdefault('pve', {}).setdefault('ebl', {})['best'] = _int(o['ebl'], 0, 10 ** 6)
+    if 'labyrinth' in o:
+        pr.d.setdefault('labyrinth', {'key': 0, 'hunts': 0})['hunts'] = _int(o['labyrinth'], 0, 10 ** 6)
+    if 'mimesis' in o:                                   # the best run: the runs above it are lowered to it, a higher one is added
+        n = _int(o['mimesis'], 0, 10 ** 9)
+        st = pr.d.setdefault('mimesis', {})
+        trips = [min(int(t), n) for t in st.get('trips', [])]
+        if n and n not in trips:
+            trips.append(n)
+        st['trips'] = sorted([t for t in trips if t], reverse=True)[:50]
+    if 'play_sec' in o:
+        pr.d['play_sec'] = _int(o['play_sec'], 0, 10 ** 10)
+    if 'days' in o:                                      # days since registration: the creation date that many days back
+        import time
+        pr.d['created'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() - _int(o['days'], 0, 36500) * 86400))
+    pr.dirty = True
 
 
 def appearance(pr, m, original=None):
@@ -554,6 +613,11 @@ def diff(a, b):
     pet_of = lambda d:{k: (d.get('pet') or {}).get(k) for k in ('name', 'level', 'ep', 'fuel', 'destroyed', 'slot')}
     if pet_of(a) != pet_of(b):
         level.append('pet')
+    stat = lambda d: (d.get('counters'), (d.get('gates') or {}).get('gates') and {k: v.get('done') for k, v in d['gates']['gates'].items()},
+                      d.get('gate_times'), (d.get('pve') or {}).get('ebl'), d.get('labyrinth'), (d.get('mimesis') or {}).get('trips'),
+                      d.get('play_sec'), d.get('created'))
+    if stat(a) != stat(b):
+        fields.append(['stats', None, sum(1 for x, y in zip(stat(a), stat(b)) if x != y)])
     layout_a, layout_b = _layout(a), _layout(b)
     hardware = len({t[-1] for t in layout_a ^ layout_b})
     return {'fields': fields, 'added': added, 'leaving': leaving, 'counts': counts, 'boosters': boost, 'levels': level,
@@ -1389,7 +1453,7 @@ OPS = {'pilot': op_pilot, 'give': op_give, 'carry': op_move, 'delete': op_delete
             'booster': op_booster, 'pet': op_pet, 'repair': op_repair, 'home_base': op_home_base, 'keybinds': op_keybinds, 'reset': op_reset,
             'rng': op_rng, 'cpu_charges': op_cpu_charges, 'duplicate': op_duplicate, 'match': op_match, 'copy_config': op_copy_config,
             'equip_many': op_equip_many, 'unequip_many': op_unequip_many, 'remove': op_remove, 'replace': op_replace, 'level_many': op_level_many,
-            'duplicate_many': op_duplicate_many, 'trim': op_trim, 'design_all': op_design_all}
+            'duplicate_many': op_duplicate_many, 'trim': op_trim, 'design_all': op_design_all, 'stats': op_stats}
 
 
 def apply(path, ops, original=None):
