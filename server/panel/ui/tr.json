@@ -1196,6 +1196,7 @@
 "Impressions of people": "Kişiler hakkındaki izlenimleri",
 "Impulsive": "Dürtüsel",
 "In Advanced mode bots speak English only (the language model is weak in other languages).": "Gelişmiş kipte botlar yalnız İngilizce konuşur (dil modeli öteki dillerde zayıf).",
+"With the built-in language model, bots chat in English, French, German, Spanish or Portuguese; the other languages fall back to English.": "Yerleşik dil modeliyle botlar İngilizce, Fransızca, Almanca, İspanyolca veya Portekizce yazar; diğer diller İngilizceye döner.",
 "In Advanced mode, bots talk using the language model; if the model can't keep up, the Normal mode chat takes over.": "Gelişmiş kipte botlar dil modeliyle konuşur; model yetişemezse Normal kipin sohbeti devralır.",
 "In Normal mode, bots read what is written and answer like real players: game questions with real game knowledge, personal questions with their own lasting story, each in their own typing style. They also talk to each other, greet, and reply to calls for help and whispers.": "Normal kipte botlar yazılanı okur ve gerçek oyuncular gibi yanıtlar: oyun sorularına gerçek oyun bilgisiyle, kişisel sorulara hep aynı kalan kendi hikâyeleriyle, her biri kendi yazış tarzıyla. Birbirleriyle de konuşur, selamlaşır, yardım çağrılarına ve fısıltılara yanıt verirler.",
 "In Quests mode the quest picks the aliens; the stars still say which ones go first.": "Görevler modunda uzaylıları görev seçer; yıldızlar yine hangilerinin önce alınacağını belirler.",

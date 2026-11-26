@@ -218,6 +218,8 @@ def decision(bot, y, now=None):
         WP.resupply(bot)                               # buys when ammo and rockets run low (like a player, between jobs)
         SK.invest(bot, now)                            # upgrades Skylab (if money and resources allow)
         GR.shopping(bot, now)                          # ship design and drone formation (by showiness and money)
+        from . import pet as BP
+        BP.buy(bot)                                    # the P.E.T. (R.E.X.) once it has spare uridium
         from . import technology as TECH
         TECH.produce(bot)                                # Assembly: technology items
         TECH.resupply(bot)                               # launcher rocket

@@ -175,6 +175,9 @@ class Bot:
             full[a] = int(v)
             fractions[a] = v - full[a]
         k['ep'] += full['ep']
+        if full['ep'] > 0 and k['gear'].get('pet'):
+            from . import pet as BP
+            BP.gain(self, full['ep'])                     # the P.E.T.'s share of the EP
         if full['credits'] > 0 and full['ep'] > 0 and k.get('clan'):
             self._clan_income = self.__dict__.get('_clan_income', 0) + full['credits']   # alien/quest gain: clan tax (society)
         k['credits'] = max(0, k['credits'] + full['credits'])

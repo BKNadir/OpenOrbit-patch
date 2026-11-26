@@ -290,9 +290,9 @@ def parse_custom(text, used=()):
 
 
 def _custom_lang(d, summary):
-    """The built-in language model is English only: in Advanced mode the custom bot's language is English too (bot/llm.py)."""
-    if d.get('mode') == 'advanced' and not PRV.multilingual():
-        return [dict(o, lang='en') if o.get('lang') else o for o in summary]
+    """In Advanced mode a custom bot whose language the language model writes badly chats in English (llm_provider.speaks)."""
+    if d.get('mode') == 'advanced':
+        return [dict(o, lang='en') if o.get('lang') and not PRV.speaks(o['lang']) else o for o in summary]
     return summary
 
 
@@ -326,8 +326,8 @@ def create(name, description='', world=None, mode='normal', progression='progres
     with _LOCK:
         name = _clean_name(name)
         pid = _new_id(name)
-        if mode == 'advanced' and not PRV.multilingual():
-            lang = 'en'                         # the built-in language model is English only (bot/llm.py; free on another provider)
+        if mode == 'advanced' and lang != 'mixed' and not PRV.speaks(lang):
+            lang = 'en'                         # a language the built-in model writes badly (llm_provider.LOCAL_LANGS; free on another provider)
         d = {'name': name, 'description': str(description or '')[:DESCRIPTION_LENGTH], 'world': None, 'mode': mode,
              'progression': progression if progression in PROGRESSIONS else 'progressive', 'seed': random.randrange(1, 2 ** 31),
              'lang': lang if lang in LANGUAGES else 'mixed', 'name_lang': name_lang_ if name_lang_ in LANGUAGES else 'mixed',
@@ -389,8 +389,8 @@ def roster(pid, count=None, lang=None, company_distribution=None, regenerate=Fal
             d['name_lang'] = d.get('lang') or 'mixed'
         if name_source in NAME_SOURCES:
             d['name_source'] = name_source           # to newly added bots and to regeneration (existing names do not change)
-        if d.get('mode') == 'advanced' and not PRV.multilingual():
-            lang = 'en'                         # the built-in language model is English only (bot/llm.py; free on another provider)
+        if d.get('mode') == 'advanced' and lang and lang != 'mixed' and not PRV.speaks(lang):
+            lang = 'en'                         # a language the built-in model writes badly (llm_provider.LOCAL_LANGS; free on another provider)
         if lang in LANGUAGES and lang != d.get('lang'):
             d['lang'] = lang
             apply_chat_lang(d)
