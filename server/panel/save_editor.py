@@ -369,6 +369,48 @@ def stats(pr):
             'gate_names': [[k, GT.GATES[k]['name']] for k in GT.GATES]}
 
 
+def _pilot_points(pr, m):
+    """(Abilities, the save's own skill_points_max): the pilot point rules of skill_tree.py with this save's settings.json."""
+    import skill_tree as ST
+    import settings as SET
+    own = SET.read(os.path.join(os.path.dirname(os.path.abspath(pr.path)), 'settings.json'))
+    return ST.Abilities(pr, m, m.gates, log=lambda *a: None), own.get('skill_points_max', SET.DEFAULTS.get('skill_points_max'))
+
+
+def pilot_points(pr, m):
+    """Pilot tab: pilot points, log disks, the price of the next point (-1 at the cap) and the cap."""
+    import skill_tree as ST
+    a, cap = _pilot_points(pr, m)
+    st = ST.state(pr)
+    return {'points': int(st['points']), 'converted': int(st['converted']), 'log_disks': int(a.logs()), 'required': a.required(cap),
+            'cap': max(len(ST.Y['log_disk']), int(cap or 0))}
+
+
+def op_convert_points(pr, m, o):
+    """Log disks -> pilot points (user request 2026-11-26: the game's Exchange button stops at 50 points; the client patch that lifted it
+    drew a second black model on other ships). The game's rules: each point costs the price of skill_tree.Abilities.required, up to
+    the save's skill_points_max. count: how many (as many as the disks and the cap allow)."""
+    a, cap = _pilot_points(pr, m)
+    n, done = _int(o.get('count', 1), 1, 1000), 0
+    for _ in range(n):
+        need = a.required(cap)
+        if need <= 0 or need > a.logs():
+            break
+        m.gates.d['log_disk'] -= need
+        import skill_tree as ST
+        st = ST.state(pr)
+        st['points'] += 1
+        st['converted'] += 1
+        done += 1
+    if not done:
+        need = a.required(cap)
+        if need <= 0:
+            raise ValueError('The pilot point limit is reached.')
+        raise ValueError('Not enough log disks: %s needed.', need)
+    NOTES.append({'kind': 'convert_points', 'done': done})
+    pr.dirty = True
+
+
 STAT_COUNTERS = ('death_by_enemy', 'death_by_radiation', 'death_other', 'quest', 'friendly', 'phoenix')
 
 
@@ -536,6 +578,7 @@ def appearance(pr, m, original=None):
         'pools': {l: rng_pool(l) for l in sorted(set(p.d['items'].values())) if rng_kind(l)},
         'all_ships': sorted(SHP.ITEMS['ships']),
         'stats': stats(p),
+        'pilot_points': pilot_points(p, m),
     }
     if original:
         out['diff'] = diff(original, p.d)
@@ -1453,7 +1496,8 @@ OPS = {'pilot': op_pilot, 'give': op_give, 'carry': op_move, 'delete': op_delete
             'booster': op_booster, 'pet': op_pet, 'repair': op_repair, 'home_base': op_home_base, 'keybinds': op_keybinds, 'reset': op_reset,
             'rng': op_rng, 'cpu_charges': op_cpu_charges, 'duplicate': op_duplicate, 'match': op_match, 'copy_config': op_copy_config,
             'equip_many': op_equip_many, 'unequip_many': op_unequip_many, 'remove': op_remove, 'replace': op_replace, 'level_many': op_level_many,
-            'duplicate_many': op_duplicate_many, 'trim': op_trim, 'design_all': op_design_all, 'stats': op_stats}
+            'duplicate_many': op_duplicate_many, 'trim': op_trim, 'design_all': op_design_all, 'stats': op_stats,
+            'convert_points': op_convert_points}
 
 
 def apply(path, ops, original=None):

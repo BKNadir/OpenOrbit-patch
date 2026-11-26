@@ -72,10 +72,18 @@ class Abilities:
     def logs(self):
         return self.k.d['log_disk']
 
-    def required(self):
+    def required(self, cap=None):
+        """Log disks for the next pilot point; -1 at the cap. The game's cap is 50 points (its price table); the skill_points_max setting
+        (fork, when present) raises it, the points past the table cost the table's last price. cap: that setting from elsewhere (the
+        character editor reads the save's own settings)."""
+        import settings as SET
         tbl = Y['log_disk']
         n = state(self.p)['converted']
-        return tbl[n] if n < len(tbl) else -1
+        if cap is None:
+            cap = SET.get('skill_points_max') if 'skill_points_max' in SET.DEFAULTS else None
+        if n >= max(len(tbl), int(cap or len(tbl))):
+            return -1
+        return tbl[min(n, len(tbl) - 1)]
 
     def reset_price(self):
         tbl, n = Y['resets'], state(self.p)['resets']
