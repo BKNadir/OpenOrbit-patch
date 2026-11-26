@@ -13,7 +13,7 @@ import map_links as H
 from .brain import Goal, target
 from . import catalog as K
 
-DEFAULT_MAPS = {'X-1': 2, 'X-2': 2, 'X-3': 2, 'X-4': 2, '4-X': 3, 'X-5': 1, 'X-6': 1, 'X-7': 1, 'X-8': 1, '4-5': 2, '5-X': 1, 'BL': 1}
+DEFAULT_MAPS = {'X-1': 2, 'X-2': 2, 'X-3': 2, 'X-4': 2, '4-X': 3, 'X-5': 1, 'X-6': 1, 'X-7': 1, 'X-8': 1, '4-5': 2, '5-X': 2, 'BL': 3}      # BL: a team per map (blacklight.team)
 
 # map class -> (ship, laser, laser count share, shield generator, drone count, drone): the typical player on that map
 CLASS_GEAR = {
@@ -28,7 +28,7 @@ CLASS_GEAR = {
     'X-8': ('ship_goliath', 'equipment_weapon_laser_lf-3', 1.0, 'equipment_generator_shield_sg3n-b02', 8, 'drone_iris'),
     '4-5': ('ship_goliath', 'equipment_weapon_laser_lf-3', 1.0, 'equipment_generator_shield_sg3n-b02', 8, 'drone_iris'),
     '5-X': ('ship_goliath', 'equipment_weapon_laser_lf-3', 1.0, 'equipment_generator_shield_sg3n-b02', 8, 'drone_iris'),
-    'BL': ('ship_goliath', 'equipment_weapon_laser_lf-3', 1.0, 'equipment_generator_shield_sg3n-b02', 8, 'drone_iris'),
+    'BL': ('ship_goliath', 'equipment_weapon_laser_pr-l', 1.0, 'equipment_generator_shield_sg3n-b02', 8, 'drone_iris'),      # Prometheus: made for BL
 }
 CLASS_LEVEL = {'X-1': 3, 'X-2': 5, 'X-3': 7, 'X-4': 9, '4-X': 11, 'X-5': 13, 'X-6': 14, 'X-7': 15, 'X-8': 16, '4-5': 17, '5-X': 18, 'BL': 24}
 
