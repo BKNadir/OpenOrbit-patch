@@ -4,7 +4,7 @@ ship (the other players' P.E.T. messages: PetActivationCommand, MoveCommand).
 
 State: gear['pet'] = {'ep': n, 'level': n} (in the gear so catalog.outfit counts its laser slots; shopping then fills them).
 """
-import math, random
+import math
 
 from . import catalog as K
 
@@ -102,10 +102,17 @@ def design(gear):
     return out
 
 
-def _spot(x, y, r=None):
-    a = (r or random).uniform(0, 2 * math.pi)
-    d = _data()['follow_distance']
-    return int(x + math.cos(a) * d), int(y + math.sin(a) * d)
+BEHIND = 260                             # how far behind its bot the P.E.T. flies (pet.json follow_distance 180 is the player's; a bot's
+                                         # P.E.T. stays further back so it does not sit on the bot's target)
+
+
+def _behind(fx, fy, tx, ty, d=BEHIND):
+    """A spot d units behind (tx, ty) seen from (fx, fy) (coming from there); straight below when there is no way."""
+    dx, dy = tx - fx, ty - fy
+    n = math.hypot(dx, dy)
+    if n < 1:
+        return int(tx), int(ty + d)
+    return int(tx - dx / n * d), int(ty - dy / n * d)
 
 
 def show(w, n, now):
@@ -115,7 +122,9 @@ def show(w, n, now):
         return []
     from world import mod
     import clan as KL
-    x, y = _spot(*n.mover.pos(now), b.r)
+    m = n.mover
+    cx, cy = m.pos(now)
+    x, y = _behind(m.x0, m.y0, cx, cy)                 # behind where it is, seen along its way
     pl = b.profile.d['pilot'] if getattr(b, 'profile', None) else {}
     try:
         rel = KL.shown_relation(w.p, b.profile)
@@ -128,9 +137,12 @@ def show(w, n, now):
         minimapStrategyModule=mod('MinimapStrategyModule', minimapStrategy=0)))]
 
 
-def follow(n, x, y, ms):
-    """The P.E.T. follows its bot's move (the same arrival time, a spot next to the target) -> messages."""
+def follow_move(n, move):
+    """The P.E.T. follows its bot's MoveCommand: to the spot behind the bot's destination, seen from where the bot is now, arriving with it
+    -> message (None without a P.E.T.)."""
     if not owned(n.bot.k['gear']):
-        return []
-    px, py = _spot(x, y, n.bot.r)
-    return [('MoveCommand', dict(userId=unit_id(n.bot), x=px, y=py, timeToTarget=ms))]
+        return None
+    import time
+    fx, fy = n.mover.pos(time.time())
+    px, py = _behind(fx, fy, move['x'], move['y'])
+    return ('MoveCommand', dict(userId=unit_id(n.bot), x=px, y=py, timeToTarget=int(move.get('timeToTarget') or 0)))

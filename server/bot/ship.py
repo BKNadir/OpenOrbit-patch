@@ -424,9 +424,7 @@ def _go_to(w, n, x, y, now, threshold=80):
         return                                       # immobile (Fortify, Frozen Claw): no crawling MoveCommand
     n.movement = (x, y)
     ms = n.mover.go(x, y, v, now)
-    from . import pet as BP
-    w.send([('MoveCommand', dict(userId=n.id, x=int(x), y=int(y), timeToTarget=ms))]
-           + (BP.follow(n, x, y, ms) if n.id in w.visible else []))      # its P.E.T. follows
+    w.send([('MoveCommand', dict(userId=n.id, x=int(x), y=int(y), timeToTarget=ms))])     # its P.E.T. follows (world.deliver)
 
 
 def _waypoints(w, n, sx, sy, x, y):
