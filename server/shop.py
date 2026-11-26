@@ -1490,7 +1490,10 @@ class Shop:
             n = int(n)
             if n <= 0 or not hidden(loot):
                 continue
-            if loose_item(loot):
+            if loot in ITEMS['ships']:                # a ship that waited in the store (the admin ships): it goes to the hangar once
+                if loot not in {s['lootId'] for s in self.p.d['ships'].values()}:
+                    self.p.add_ship(loot)
+            elif loose_item(loot):
                 for _ in range(n):
                     self.p.new_item(loot)
             elif loot in SE.RESERVES:
