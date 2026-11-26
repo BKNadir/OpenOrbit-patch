@@ -578,6 +578,12 @@ class World:
             if gone:
                 pets.difference_update(gone)
                 msgs = msgs + [('ShipRemoveCommand', {'userId': u}) for u in gone]
+            # every move of a shown bot takes its P.E.T. along, behind it on the way (user report 2026-11-26: a P.E.T. left where its bot
+            # had been sat on aliens and other ships)
+            follow = [BP.follow_move(self.npcs[m[1]['userId']], m[1]) for m in msgs if m[0] == 'MoveCommand'
+                      and m[1]['userId'] + BP.ID_OFFSET in pets and m[1]['userId'] in self.npcs]
+            if follow:
+                msgs = msgs + [f for f in follow if f]
         msgs = [self.hero_miss(m) for m in msgs if self.item_filter(m) and self.hit_shown(m)]
         if hold:
             msgs = self.merge_hits(msgs)
@@ -991,9 +997,12 @@ class World:
         if n.bot is not None:
             msgs += BG.extra_look(n)                 # the bot's title and drones (like the player's ship)
             from bot import pet as BP
-            pet = BP.show(self, n, now)              # its P.E.T. next to it
+            pet = BP.show(self, n, now)              # its P.E.T. behind it
             if pet:
-                self.__dict__.setdefault('bot_pets', set()).add(BP.unit_id(n.bot))
+                pets = self.__dict__.setdefault('bot_pets', set())
+                if BP.unit_id(n.bot) in pets:        # shown again (new look): the old one goes first, never two of them
+                    msgs.insert(0, ('ShipRemoveCommand', {'userId': BP.unit_id(n.bot)}))
+                pets.add(BP.unit_id(n.bot))
             msgs += pet
         msgs += list((getattr(n, 'images', None) or {}).values())     # permanent visuals (Ö4: evacuation zone, Guardian area)
         m = n.mover
