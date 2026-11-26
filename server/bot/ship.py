@@ -1797,7 +1797,7 @@ def collect_box(w, n, now):
     own = ('b', n.id)
     decision = n.__dict__.setdefault('stealing', {})
     from . import palladium as PD
-    palladium = w.map_id in PD.FIELDS and PD.wants(b)
+    palladium = w.map_id in PD.FIELDS and PD.collecting(b)
     en, best_score = None, 900.0 * PL.box_factor(b) ** 0.7       # a box hunter sees boxes from far away (playstyle.py)
     for h, k in w.boxes.items():
         tip = k.get('tip')
@@ -1884,8 +1884,10 @@ def collect_palladium(w, n, now):
     like a player: the piece disappears for everyone and grows back as for the player (world.finish_harvest) -> is it busy with this."""
     from . import palladium as PD
     b = n.bot
-    if w.map_id not in PD.FIELDS or int(now // PD.COLLECT_PHASE_SEC) % 2 or b.cargo_fill() >= 1 or not PD.wants(b):
+    if w.map_id not in PD.FIELDS or b.cargo_fill() >= 1 or not PD.collecting(b):
         return False
+    if int(now // PD.COLLECT_PHASE_SEC) % 2 and not PD.quest_needs(b):
+        return False                                     # in turns with hunting (a quest's collection goes on all the time)
     nx, ny = n.mover.pos(now)
     en, best = None, 1e18
     for h, o in list(getattr(w, 'ores', {}).items()):
@@ -1906,6 +1908,7 @@ def collect_palladium(w, n, now):
     got = b.add_cargo({PD.PALLADIUM: max(1, int(round(b.game_settings.multiplier('collecting', 'ore'))))}).get(PD.PALLADIUM, 0)
     if got:
         b.ist('palladium', got)
+        PD.counted(b, got)
     n.next_think = now + WD.ORE['harvest_sec'] + random.uniform(0.2, 0.6)
     return True
 

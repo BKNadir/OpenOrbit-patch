@@ -41,6 +41,27 @@ def pull(bot):
     return 0.6 + 0.4 * bot.o('ambition') + 0.3 * bot.o('rivalry')
 
 
+def quest_needs(bot):
+    """Is the running quest's next condition a Palladium collection (pirate quests: A Cross to Bear, Penultimate Operations)."""
+    if not bot.k.get('quest') or not bot.permission.get('cargo', True):
+        return False
+    from .goals import quest as BQ
+    s = BQ.next_up(bot)
+    return bool(s) and s[0]['type'] == BQ.COLLECT_LOOT
+
+
+def collecting(bot):
+    """Does it pick up Palladium where it is: for gate energy or for its quest."""
+    return int(bot.game_map) in FIELDS and (quest_needs(bot) or wants(bot))
+
+
+def counted(bot, n, y=None):
+    """Palladium picked up: the quest's collection condition advances."""
+    if n > 0 and bot.k.get('quest'):
+        from .goals import quest as BQ
+        BQ.advance(bot, BQ.COLLECT_LOOT, n, game_map=int(bot.game_map), y=y, loot=LOOT)
+
+
 def held(bot):
     """Palladium in the cargo and in storage (sell_cargo puts it in storage at the company station)."""
     from . import weapons as WP
@@ -58,13 +79,14 @@ def per_hour(bot, map_id):
     return FIELDS.get(int(map_id), 0.0) * bot.game_settings.multiplier('collecting', 'ore')
 
 
-def collect(bot, k):
+def collect(bot, k, y=None):
     """Abstract mode: k hours of effective play on the bot's map -> Palladium into the cargo (as far as it fits)."""
     n = int(per_hour(bot, bot.game_map) * COLLECT_SHARE * k + bot.r.random())
     if n > 0:
         got = bot.add_cargo({PALLADIUM: n}).get(PALLADIUM, 0)
         if got:
             bot.ist('palladium', got)
+            counted(bot, got, y)
 
 
 def trade(bot):

@@ -112,9 +112,9 @@ def farm(bot, dt, y, target_kind=None):
     efficiency *= PL.combat_efficiency(bot)                  # skill (combat, focus), the day's form, habits
     k = dt / 3600.0 * speed * efficiency
     from . import palladium as PD
-    palladium = bot.game_map in PD.FIELDS and not (y is not None and y.mode == 'simple') and PD.wants(bot)     # simple mode: no trade trips
-    if palladium:                                             # Palladium for free gate energy (part of the time: fewer kills); picking up
-        PD.collect(bot, dt / 3600.0 * speed * (1 - 0.35 * bot.mood['fatigue']))        # is not combat: only tiredness slows it
+    palladium = not (y is not None and y.mode == 'simple') and PD.collecting(bot)     # simple mode: no trade trips
+    if palladium:                                             # Palladium for free gate energy or a quest (part of the time: fewer kills);
+        PD.collect(bot, dt / 3600.0 * speed * (1 - 0.35 * bot.mood['fatigue']), y)     # picking up is not combat: only tiredness slows it
         k *= 1 - PD.COLLECT_SHARE
     kills = r['kills']
     if target_kind and target_kind in kills:

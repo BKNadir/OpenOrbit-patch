@@ -8,8 +8,9 @@ from ..brain import Goal, target
 from .. import catalog as K
 from .. import abstract_sim as S
 
-KILL_NPC, KILL_PLAYERS, VISIT_MAP, ON_MAP, HOME = 6, 28, 34, 77, 62
-SUPPORTED = {KILL_NPC, KILL_PLAYERS, VISIT_MAP, HOME}
+KILL_NPC, KILL_PLAYERS, VISIT_MAP, ON_MAP, HOME, COLLECT_LOOT, COORDINATES = 6, 28, 34, 77, 62, 67, 11
+SUPPORTED = {KILL_NPC, KILL_PLAYERS, VISIT_MAP, HOME, COLLECT_LOOT}
+PALLADIUM_LOOT = 'resource_ore_palladium'      # the only loot a bot collects on purpose (bot/palladium.py: 5-1 and 5-3)
 _quests = None
 _id_type = None
 
@@ -30,16 +31,21 @@ def quests():
             ok = True
             for el in q['root'].get('modifier', []):
                 c = el.get('condition')
-                if not c or c['type'] not in SUPPORTED:
+                if not c or c['type'] not in SUPPORTED or (c['type'] == COLLECT_LOOT and set(c.get('matches', [])) != {PALLADIUM_LOOT}):
                     ok = False
                     break
                 maps = [m for s in c.get('subConditions', []) if s.get('type') == ON_MAP for m in s.get('matches', [])]
-                if any(s.get('type') not in (ON_MAP,) for s in c.get('subConditions', [])):
+                # a point to fly to on the map (pirate quests: "visit 10700/6700 on 5-3"): visiting the map counts
+                allowed = (ON_MAP, COORDINATES) if c['type'] == VISIT_MAP else (ON_MAP,)
+                if any(s.get('type') not in allowed for s in c.get('subConditions', [])):
                     ok = False
                     break
                 conditions.append(dict(id=c['id'], type=c['type'], target=int(c.get('targetValue', 1)), matches=list(c.get('matches', [])),
                                 maps=maps))
-            package = any(str(l).startswith('ship_') or (l == 'currency_uridium' and n >= 10000) for l, n in q.get('rewards', []))
+            # welcome package (a ship, thousands of uridium at the start: Proven Pilot, Level 1); the uridium rule used to drop the level 17-22
+            # quests too, the pirate quests among them (Martial Law, Collateral Damage)
+            package = any(str(l).startswith('ship_') or (l == 'currency_uridium' and n >= 10000 and int(q.get('level', 0)) < 10)
+                          for l, n in q.get('rewards', []))
             if ok and conditions and not package:            # welcome package (ship, thousands of uridium): bots start from zero like everyone else
                 out[int(qid)] = dict(level=int(q.get('level', 0)), previous=[int(x) for x in q.get('previous', [])], conditions=conditions,
                                      rewards=q.get('rewards', []), name=q.get('name', ''), ordered=q['root'].get('ordered', False))
@@ -89,6 +95,9 @@ def next_up(bot):
                 maps = [m for h in c['matches'] for m in map_list(h, bot.company)]
             elif c['type'] == HOME:
                 maps = [K.ev(bot.company)]
+            elif c['type'] == COLLECT_LOOT and not maps:
+                from .. import palladium as PD
+                maps = list(PD.FIELDS)                   # Palladium: the fog fields of 5-1 and 5-3
             elif c['type'] == KILL_NPC and not maps:
                 # no map given: the nearest map where that alien appears and that it can enter
                 types = {t for k in c['matches'] for t in npc_types(k)}
@@ -101,7 +110,7 @@ def next_up(bot):
     return None
 
 
-def advance(bot, kind, n=1, npc_id=None, game_map=None, y=None):
+def advance(bot, kind, n=1, npc_id=None, game_map=None, y=None, loot=None):
     """An event advances the quest (alien killed while grinding, PvP, map entry) -> whether the quest is done."""
     g = bot.k.get('quest')
     if not g:
@@ -118,6 +127,8 @@ def advance(bot, kind, n=1, npc_id=None, game_map=None, y=None):
                 break
             continue
         if kind == KILL_NPC and npc_id is not None and str(npc_id) not in c['matches']:
+            continue
+        if kind == COLLECT_LOOT and loot not in c['matches']:
             continue
         maps = [m for h in c['maps'] for m in map_list(h, bot.company)]
         if kind == VISIT_MAP:
