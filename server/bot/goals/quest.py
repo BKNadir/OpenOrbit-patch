@@ -163,6 +163,29 @@ def finish(bot, q, y):
     bot.event('quest_done', name=q['name'])
 
 
+def _pirate_group(bot, m, y, now):
+    """A pirate quest is played in a group (user request 2026-11-26): heading to a pirate map without a group, the bot invites up to three
+    pilots of its company near its level who are grinding or questing; they follow it there (goals/group.py) and hunt as a team."""
+    from .. import blacklight as BLK
+    import group as GR
+    if y is None or int(m) not in BLK.PIRATE_MAPS or GR.group_of(bot.uid) is not None or not bot.permission.get('group', True):
+        return
+    cands = [o for o in y.bots if o is not bot and o.online and o.company == bot.company and o.dead_until <= now and abs(o.level - bot.level) <= 6
+             and GR.group_of(o.uid) is None and o.target is not None and o.target.name in ('grinding', 'quest')
+             and K.can_enter(int(m), o.company, o.level)]
+    if not cands:
+        return
+    cands.sort(key=lambda o: (o.game_map != int(m), -bot.memory.relation(o.name, now)))
+    party = [bot] + cands[:3]
+    until = now + bot.r.uniform(40 * 60, 90 * 60)
+    BLK.form_group(y, bot, party, now, until)
+    from .. import brain as B
+    for o in party[1:]:
+        if GR.group_of(o.uid) is GR.group_of(bot.uid):
+            B.force(o, 'group', pay=0.9, duration=until - now, now=now)
+    bot.event('group_invite', now, name=', '.join(o.name for o in party[1:]))
+
+
 def deferred(bot):
     """The quest cannot be done for now (it is not strong enough for the requested alien): it is dropped and retried after a level-up (a real
     player also cancels the quest and comes back later)."""
@@ -252,6 +275,7 @@ class Quest(Goal):
             return
         maps = safe or maps
         target_map = pick_map(bot, maps, types, y)
+        _pirate_group(bot, target_map, y, now or bot.hour())
         bot.plan['condition'] = c['id']
         bot.plan['map'] = target_map
         bot.plan['tip'] = next((v['tip'] for v, _ in K.map_npcs(target_map) if v['tip'] in types), None)

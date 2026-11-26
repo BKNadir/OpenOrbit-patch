@@ -132,6 +132,13 @@ def map_candidates(bot, value, y=None):
         crowd = (lambda m: len(y.on_map.get(m, ())) - (1 if m == bot.game_map else 0)) if y is not None else (lambda m: 0)
         out = [(u + PD.pull(bot) * max(0.0, best) * PD.FIELDS[m] / max(PD.FIELDS.values()) / (1 + 0.04 * max(0, crowd(m)))
                 if m in PD.FIELDS else u, m, r) for u, m, r in out]
+    if out and y is not None:
+        # the pirate maps are never left empty (user request 2026-11-26): with fewer than PIRATE_FEW bots there, one a capable pilot can
+        # hunt on (it is in out: it has targets there) gains a share of the best map's utility, more for a bold one
+        from . import blacklight as BLK
+        best = max(u for u, _, _ in out)
+        few = lambda m: max(0, BLK.PIRATE_FEW - len(y.on_map.get(m, ())) + (1 if m == bot.game_map else 0)) / BLK.PIRATE_FEW
+        out = [(u + (0.5 + 0.4 * o['risk']) * max(0.0, best) * few(m) if m in BLK.PIRATE_MAPS else u, m, r) for u, m, r in out]
     pull = {m: event_pull(bot, m, y.now if y is not None else time.time()) for _, m, _ in out}
     if any(v > 1.0 for v in pull.values()):
         # an open-map event draws who it fits: a share of the best map's utility on top (the event map's own aliens may pay little;

@@ -13,7 +13,7 @@ import map_links as H
 from .brain import Goal, target
 from . import catalog as K
 
-DEFAULT_MAPS = {'X-1': 2, 'X-2': 2, 'X-3': 2, 'X-4': 2, '4-X': 3, 'X-5': 1, 'X-6': 1, 'X-7': 1, 'X-8': 1, '4-5': 2, '5-X': 2, 'BL': 2}      # pirate and BL: like the standard maps
+DEFAULT_MAPS = {'X-1': 2, 'X-2': 2, 'X-3': 2, 'X-4': 2, '4-X': 3, 'X-5': 1, 'X-6': 1, 'X-7': 1, 'X-8': 1, '4-5': 2, '5-X': 4, 'BL': 8}      # pirate maps never empty; BL: several groups per map
 
 # map class -> (ship, laser, laser count share, shield generator, drone count, drone): the typical player on that map
 CLASS_GEAR = {
@@ -128,4 +128,26 @@ class Simple(Goal):
 
     def abstract(self, bot, dt, y):
         from . import abstract_sim as S
+        _bl_group(bot, y)
         S.farm(bot, dt, y)
+
+
+BL_GROUP = (3, 4)                 # simple mode: the bots of a company on a BL map play in groups of this size
+
+
+def _bl_group(bot, y):
+    """Simple mode on a BL map: the bots of a company there form groups of 3-4 (several groups per map, user request 2026-11-26); checked
+    every few minutes."""
+    from . import blacklight as BLK
+    import group as GR
+    now = y.now if y is not None else bot.hour()
+    if y is None or int(bot.game_map) not in BLK.BL_MAPS or now < bot.__dict__.get('_bl_group_t', 0):
+        return
+    bot._bl_group_t = now + bot.r.uniform(120, 300)
+    if GR.group_of(bot.uid) is not None:
+        return
+    free = [o for o in y.on_map.get(bot.game_map, ()) if o is not bot and o.online and o.company == bot.company and GR.group_of(o.uid) is None]
+    if len(free) + 1 < BL_GROUP[0]:
+        return
+    party = [bot] + free[:bot.r.randint(*BL_GROUP) - 1]
+    BLK.form_group(y, bot, party, now, float('inf'))

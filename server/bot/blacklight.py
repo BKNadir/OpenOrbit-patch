@@ -17,6 +17,8 @@ TEAM_MAX = 8                                  # a group's size (group.MAX_COUNT)
 PROMETHEUS = 'equipment_weapon_laser_pr-l'
 A_BL = 'ammunition_laser_a-bl'
 BL_MAPS = frozenset(BL_MAP.values())
+PIRATE_MAPS = frozenset((91, 92, 93))         # 5-1..5-3: a group hunts as a team there (a pirate quest's group, goals/quest.py)
+PIRATE_FEW = 3                                # fewer bots than this on a pirate map: it draws capable pilots (brain.map_candidates)
 
 
 def entry_level(bot):
@@ -36,11 +38,41 @@ def factor(gear):
 
 
 def team(bot, y):
-    """The bot's team on a BL map: the online bots of its company there (with it), at most a group's size."""
-    if y is None or int(bot.game_map) not in BL_MAPS:
+    """The bot's team: on a BL map the online bots of its company there (with it); on a pirate map its group's bots there; at most a
+    group's size."""
+    m = int(bot.game_map)
+    if y is None or (m not in BL_MAPS and m not in PIRATE_MAPS):
         return 1
-    n = sum(1 for o in y.on_map.get(bot.game_map, ()) if o.company == bot.company and o.online)
+    if m in BL_MAPS:
+        n = sum(1 for o in y.on_map.get(m, ()) if o.company == bot.company and o.online)
+    else:
+        import group as GR
+        g = GR.group_of(bot.uid)
+        if g is None:
+            return 1
+        n = sum(1 for o in y.on_map.get(m, ()) if o.uid in g.members and o.online)
     return max(1, min(TEAM_MAX, n))
+
+
+def form_group(y, leader, members, now, until):
+    """A real in-game group (group.py) of bots: the leader invites, the others accept at once (they came for it); until: society.party
+    does not break it up before then."""
+    import group as GR
+    import community as TP
+    from . import society as SO
+    for o in members:
+        if o is not leader and GR.group_of(o.uid) is not None and GR.group_of(o.uid) is not GR.group_of(leader.uid):
+            GR.handle(SO.person(o), 'LeaveGroupRequest', {})
+    for o in members:
+        if o is leader or GR.group_of(o.uid) is not None or TP.find(uid=o.uid) is None or TP.find(uid=leader.uid) is None:
+            continue
+        g = GR.group_of(leader.uid)
+        if g is not None and len(g.members) >= TEAM_MAX:
+            break
+        GR.handle(SO.person(leader), 'GroupInvitationRequest', {'candidateId': o.uid})
+        GR.handle(SO.person(o), 'InvitationAcceptRequest', {'inviterId': leader.uid})
+    for o in members:
+        o.party_until = until
 
 
 def judged(bot, n=None, y=None):
