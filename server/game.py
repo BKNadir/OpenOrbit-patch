@@ -27,7 +27,7 @@ Login flow (from the real server's record, see belgeler/istemci/kayit_analizi.md
   Galaxy Gates (galaxy_gates.py): GalaxyGateBuilder* requests; the gate portals in X-1 and the waves on the gate map are tied to the world.
 Template files are produced with recording/extract_templates.py; if missing, only the smallest login (ship + LoginResponse) is sent from the profile.
 """
-import contextlib, os, re, sys, socket, threading, time, json, math
+import contextlib, os, re, sys, socket, threading, time, json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -43,6 +43,7 @@ import world               # noqa: E402
 import galaxy_gates as GALAXY        # noqa: E402
 import event_gate as EKP  # noqa: E402
 import labyrinth as LAB      # noqa: E402
+import mimesis as MM         # noqa: E402
 import pve_modes as PVM   # noqa: E402
 import low as LOW          # noqa: E402
 import assembly as ASM     # noqa: E402
@@ -80,7 +81,6 @@ import galactic_strife as GS  # noqa: E402
 import pilot as PILOT  # noqa: E402  (Auto Mode)
 import cbs as CBS
 import stores as STO
-import player_profile as PF
 import inventory as INV
 import multiplayer as CO
 import community as TP
@@ -94,12 +94,18 @@ ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 LOG_DIR = ARGS[0] if ARGS else '.'
 DATA = os.path.join(HERE, 'data')
 lock = threading.Lock()
+_log_fh = None
 
 
 def log(text):
+    # one handle kept open (opening per line cost ~0.3 ms under the lock). Append mode seeks to the end on every write, so the panel's
+    # "Clear" (truncate) still works while the game runs; rotation only happens while no server runs (launcher.rotate_logs skips a held file)
+    global _log_fh
     with lock:
-        with open(os.path.join(LOG_DIR, 'gs.log'), 'a', encoding='utf8') as fh:
-            fh.write(time.strftime('%H:%M:%S ') + text + '\n')
+        if _log_fh is None:
+            _log_fh = open(os.path.join(LOG_DIR, 'gs.log'), 'a', encoding='utf8')
+        _log_fh.write(time.strftime('%H:%M:%S ') + text + '\n')
+        _log_fh.flush()
 
 
 def encode(msgs):
@@ -188,8 +194,10 @@ class Templates:
                     continue
                 windows.add(m.get('itemId'))
             if mk in ('@harita_giris', '@harita_hazir'):
-                lv = profile.d['pilot'].get('level', 1)
-                out += [(n, f) for n, f in self.world_msgs(map_id, 'entry' if mk == '@harita_giris' else 'ready')
+                lv, fac = profile.d['pilot'].get('level', 1), profile.d['pilot'].get('factionId')
+                # the portals' 5-X visibility by this player's company (map_world is cached with the host's: a guest, a company switch)
+                out += [(n, H.gate_for(f, fac) if n == 'JumpgateCreateCommand' else f)
+                        for n, f in self.world_msgs(map_id, 'entry' if mk == '@harita_giris' else 'ready')
                         if not (n == 'JumpgateCreateCommand' and f['gateId'] == H.TUTORIAL_GATE and lv >= H.TUTORIAL_MAX_LEVEL)]
             elif kind == 'ready' and (mk == 'EquipReadyCommand' or m.get('message', '').startswith('0|n|MSG|3|2|msg_equip_')):
                 continue               # true everywhere in the record; the world sends it as it enters and leaves the station zone (world.check_gates)
@@ -260,6 +268,7 @@ PROFILE_PATH = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--pro
 STOP = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--stop-file=')), None)    # panel: when it appears save and exit
 # record (account without Premium): 0|l 19.2 s after the exit button, the connection closes; with Premium the client says "Log out ... in just five seconds"
 LOGOUT_SEC = 5.0 if Profile.premium else 19.2
+STOP_SEC = 4.5          # stop_gracefully's budget: the panel kills the process 6 s after the stop file (panel/processes.py)
 
 TEMPLATE = Templates()
 PROFILE = Profile(TEMPLATE.entry.get('seed'), **({'path': PROFILE_PATH} if PROFILE_PATH else {}))
@@ -424,6 +433,9 @@ class Session:
         self.bank_next = 0.0
         self.achievement = Achievements(self.profile, log)                               # achievements and titles
         self.achievement.send = lambda m: self.send(m, 'achievement')
+        # the client drops 0|A|ACG until its first ShipInitializationCommand on the connection (MapInfo.IsMapLoaded/IsHeroLoaded); a map change
+        # also waits (held until ReadyRequest: achievement.flush)
+        self.achievement.ready = lambda: self.ready_n > 0 and not self.map_pending
         self.profile.ach = self.ach_event
         self.gates.world = lambda: self.world
         self.gates.info_tpl = next((m for e in TEMPLATE.replies.get('GalaxyGateBuilderInfoRequest', []) for m in e['response']
@@ -703,6 +715,7 @@ class Session:
         self.world.auto_buy_fail = self.shop.auto_buy_fail
         self.world.auto_lab = self.shop.auto_lab                  # auto lab CPUs
         self.world.money_msgs = self.shop.money_msgs
+        self.world.lang = lambda: self.shop.lang        # the client's language (set by the chat login, maybe after this: read it when needed)
         self.world.drone_msgs = self.shop.drone_msgs
         self.world.drone_item = self.shop.drone_item
         self.world.unit_msgs = lambda: (self.achievement.title_msgs() + self.shop.drone_msgs()
@@ -715,14 +728,17 @@ class Session:
         self.world.map_msgs = lambda: TEMPLATE.world_msgs(map_id, 'entry')
         self.world.on_home = self.respawn_home
         self.world.session_tick = self.tick                        # Assembly, Dispatch, Skylab timers
+        self.world.resource_msgs = self.shop.resource_msgs
         self.world.grant = self.shop.reward                       # the equipment in an alien's extra reward (The Stinger: Caucasus)
         self.world.pet = self.pet
         self.pet.attach(self.world)
         self.world.gg_energy = self.gates.bonus_energy
         LAB.expire_keys(self.profile)                                     # if Frozen Labyrinth is over, the keys are deleted
+        # a Mimesis Mutiny run: its Escort maps 430/433/436 are Frozen Labyrinth map numbers, the labyrinth is not set up for it
+        escort = int(map_id) in MM.MAPS and MM.active() and bool(getattr(self.extra.mimesis, 'pending', None))
         self.world.extra_gates = (self.gates.home_portals(map_id, TEMPLATE.station(map_id)) +     # gates prepared in X-1
                                   self.event_gates.entry_portals(map_id, TEMPLATE.station(map_id)) +  # event gates
-                                  LAB.portals(map_id, self.gates.home()) +                    # the labyrinth's zone portals
+                                  ([] if escort else LAB.portals(map_id, self.gates.home())) +   # the labyrinth's zone portals
                                   self.pve.portals(map_id, TEMPLATE.station(map_id)) +              # the modes' gates (stage 8)
                                   self.extra.portals(map_id, TEMPLATE.station(map_id)))                # Ö3: Fiesta Gate
         self.world.start()
@@ -732,7 +748,7 @@ class Session:
         elif int(map_id) in EKP.BY_MAP:
             with self.world.lock:
                 self.world.gate = EKP.Run(self.event_gates, self.world, EKP.BY_MAP[int(map_id)])
-        elif int(map_id) in LAB.MAPS:
+        elif int(map_id) in LAB.MAPS and not escort:
             with self.world.lock:
                 self.world.labyrinth = LAB.Labyrinth(self.world)        # Frozen Labyrinth (labyrinth.py)
         with self.world.lock:
@@ -857,6 +873,8 @@ class Session:
                 self.win_sent = {f['itemId']: f['visible'] for n, f in items}
                 self.cal_sent = cur
                 ACV.set_events(achievement_groups(now))
+        if self.achievement.held and self.achievement.ready():
+            self.send(self.achievement.flush(), 'achievement (held)')     # one held by another thread right as the map became ready
         self.quest.tick(now)                          # timed quests
         if self.profile.d.get('booster_subscription') and now >= getattr(self, 'subscription_next', 0):
             self.subscription_next = now + 5.0
@@ -1029,9 +1047,15 @@ class Session:
                 self.ready_n += 1
             # the Restabilize tab's list: in the record it comes separately after login and when the inventory changes, it is not in the login bundles;
             # since it was only put in place of the record in the bundle it never went, the tab said "No Items" (live test H69)
-            unstable = [GM.list_cmd(self.profile)]
+            # the Recycle "don't show again" choice (ship_module stores RerollWindowSettingsRequest; the recording sends it at login,
+            # RerollUIData.UpdateRerollWindowSettings): otherwise the confirmation came back on every login
+            unstable = [GM.list_cmd(self.profile), ('RerollWindowSettingsModule', {'rerollPopupSettings': bool(
+                (self.profile.d.get('reroll_settings') or {}).get('rerollPopupSettings'))})]
             self.send(login_batch('ready', profile=self.profile) + self.shop.login_msgs() + self.pet.login_msgs() + self.achievement.title_msgs()
                       + self.new_.login_msgs() + unstable + self.extra.login_msgs(), 'ready bundle')
+            held = self.achievement.flush()          # completion notices of the login / map change: the client shows them only now
+            if held:
+                self.send(held, 'achievement (held)')
             if start:
                 self.start_world()
                 self.achievement.sync()              # level, P.E.T. level, equipped items (those reached earlier also count)
@@ -1045,7 +1069,9 @@ class Session:
                 self.send(self.cbs.attach(self.world), 'CBS: map reloaded')
                 self.world.resend()
             if self.ready_n > 1:                 # map loaded (portal, warp, respawn): the client rebuilds the menu
-                self.extra.on_ready()               # (the Urgent Missions icon, urgent_quests.py)
+                loaded = self.extra.on_ready()      # (the Urgent Missions icon, urgent_quests.py)
+                if loaded:
+                    self.send(loaded, 'events: map loaded')
             self.pet.on_ready()
         elif name == 'KeepAlive':
             self.send([('StayinAlive', {})], quiet=True)
@@ -1128,7 +1154,7 @@ class Session:
             # only at the station as in the game; when the ship changes the client reloads the map with the new ship (like a respawn)
             k = self.profile.d['position']
             here = (k.get('mapId'), k.get('x'), k.get('y'))
-            msgs, changed = self.shop.activate(f, in_station=w.in_station() if w else True, travel=True)
+            msgs, changed = self.shop.activate(f, in_station=bool(w and w.in_station()), travel=True)    # no world (login, map change): not at the station
             self.send(msgs, 'hangar: activate ship')
             if changed and w:
                 w.items.reveal()      # changing ship at the base ends the cloak CPU (fandom Cloak; except Ship Warp: ship_warp.py)
@@ -1197,6 +1223,7 @@ class Session:
             self.send(RT.balance(self.profile, f), 'account history')
         elif name == 'LogoutCancelRequest':
             self.logout_cancel()
+            self.send([legacy('0|t')], 'exit cancelled')     # as the recording: the client closes the exit window, clears LogoutBreakByUser
         elif name == 'HintWindowClosedRequest':      # the real server does not reply (record); a closed hint must not open again
             c = (f.get('closedWindow') or {}).get('content')
             if c is not None and not f.get('wasOpenedFromArchive'):
@@ -1245,7 +1272,7 @@ class Session:
             c = self.profile.d.get('news_read', {})
             ids = [dict(_='CommandCenterNewsModule', eventId=x.get('eventId', 0), newsId=x['newsId'], clickCount=c[x['newsId']])
                    for x in f.get('newsInfo') or [] if c.get(x.get('newsId'))]
-            self.send([('CommandCenterInfoCommand', {'ids': ids})], 'Command Center: %d haber' % len(f.get('newsInfo') or []))
+            self.send([('CommandCenterInfoCommand', {'ids': ids})], 'Command Center: %d news' % len(f.get('newsInfo') or []))
         elif name in SILENT:
             if name == 'EggTriggerRequest' and 0 <= f.get('eggTriggerType', -1) < len(EGG_TYPES):
                 self.profile.ach('egg', type=EGG_TYPES[f['eggTriggerType']])     # hidden achievements (EVENT_SECRET); it has no reply
@@ -1346,6 +1373,9 @@ class Session:
 
     def run(self):
         log('connect %s' % (self.addr,))
+        if self.profile is PROFILE and not CO.is_open():   # single player: a second client of the pilot takes over the first one
+            for old in [s for s in list(SESSIONS) if s is not self and s.profile is PROFILE]:
+                old.hand_over()                            # (two worlds used to change one profile; the friend server does it in bind_login)
         fr = P.Framer(client_side=True)
         last_save = time.time()
         try:
@@ -1357,6 +1387,9 @@ class Session:
                     mid, name, f, left, err = P.decode_message(pkt)
                     if CONTROL:
                         CTL.TRACE.add('<-', name, f)
+                    if err:
+                        log('<- %s(%s) %s [ERROR %s]: not handled' % (name, mid, P.fmt(P.redact(f, self.secrets), 300), err))
+                        continue                  # half-read fields (a damaged packet) must not drive a purchase, a jump ...
                     with self.packet_lock:
                         try:                      # one request's error must not bring down the session: the stack trace to the log, the client stays connected
                             self.on_packet(name, mid, f, err)
@@ -1368,10 +1401,20 @@ class Session:
                         last_save = time.time()
                         self.play_time()
                         save_profile(self.profile)
-        except ConnectionError as e:
+        except (ConnectionError, TimeoutError) as e:      # TimeoutError: TCP keepalive found the guest gone (multiplayer.keepalive)
             log('   connection closed: %r' % e)
         except Exception:
             log('error\n%s' % traceback.format_exc())
+        self.logout_cancel()                        # an exit countdown must not fire on the closed session (save, 0|l, close)
+        pet = getattr(self, 'pet', None)
+        if pet is not None and pet.active:          # logging out with the P.E.T. in space: its HEAT cooling delay starts now (pet.cool)
+            pet.stop_heat(time.time())
+        close = getattr(getattr(self, 'extra', None), 'close', None)
+        if close:                                   # TDM / Sector Control match, CTB raid: their drafted bots are released now
+            try:
+                close()
+            except Exception:
+                log('   events could not be closed:\n%s' % traceback.format_exc())
         if self.world:
             self.world.stop()
         if self.profile is not None:
@@ -1459,6 +1502,7 @@ def handle(c, addr):
     if CO.is_http(first):
         CO.http(c, addr, sys.modules[__name__])
     else:
+        CO.keepalive(c)          # a guest gone without FIN (Wi-Fi, sleep): recv ends instead of leaving a ghost ship on the shared map
         Session(c, addr, wait=True, queue=True).run()
 
 
@@ -1491,10 +1535,10 @@ def server_info():
     ms = CO.entries()
     names = sorted({s.profile.d['pilot'].get('userName', '?') for s in list(SESSIONS) if s.profile is not None})
     try:
-        client = open(os.path.join(DATA, 'protocols', 'version.txt'), encoding='utf8').read().strip() or '1.1.117'
+        client = open(os.path.join(DATA, 'protocols', 'version.txt'), encoding='utf8').read().strip() or '1.1.119'
     except OSError:
-        client = '1.1.117'
-    client = max(client, '1.1.117', key=lambda v: tuple(int(x) for x in v.split('.')))     # version.txt may be stale after an update
+        client = '1.1.119'
+    client = max(client, '1.1.119', key=lambda v: tuple(int(x) for x in v.split('.')))     # version.txt may be stale after an update
     # 'sunucu', 'protokol' and X-DarkOrbit: this is the friend version negotiation, old panels read it too: does not change
     return {'sunucu': 'darkorbit', 'protokol': CO.PROTOCOL, 'code': CO.SETTINGS['code'], 'client': client,
             'pilot': PROFILE.d['pilot'].get('userName', ''), 'players': names, 'guest': len(ms), 'max_count': CO.SETTINGS['max_count'],
@@ -1540,22 +1584,35 @@ def autosave():
 
 
 def stop_gracefully():
-    """The panel's stop request: the session's play time and the profile are saved, the process exits."""
-    try:
-        if CURRENT is not None:
-            CURRENT.play_time()
-        PROFILE.save(force=True)
-        BOT.close()                       # bot paketinin durumu
-        if CO.is_open():                     # the guests' final state is given to their panels (to pending polls), the extra players' to their slots
-            for s in list(SESSIONS):
-                if s.guest is not None or s.local is not None:
-                    s.play_time()
-            for y in CO.local_players():
-                save_profile(y.profile)
-            CO.shutdown()
-        log('panel: stop request, profile saved, server shutting down')
-    except Exception as e:
-        log('panel: save error while stopping %r' % e)
+    """The panel's stop request: the session's play time and the profile are saved, the process exits. The panel kills the process 6 s after the
+    stop file (everything here fits in STOP_SEC): the player's profile first, every step on its own (one failing does not skip the others), the bot pack (its lock
+    can be held by the world loop) and the guests' hand-over bounded."""
+    end = time.time() + STOP_SEC
+
+    def step(what, fn):
+        try:
+            fn()
+        except Exception as e:
+            log('panel: %s failed while stopping: %r' % (what, e))
+    step('play time', lambda: CURRENT is not None and CURRENT.play_time())
+    step('profile save', lambda: PROFILE.save(force=True))
+    if CO.is_open():                     # the guests' final state is given to their panels (to pending polls), the extra players' to their slots
+        for s in list(SESSIONS):
+            if s.guest is not None or s.local is not None:
+                step('play time', s.play_time)
+        for y in CO.local_players():
+            save_profile(y.profile)      # logs its own error
+    bots = threading.Thread(target=step, args=('bot save', BOT.close), daemon=True)       # bot pack state, then the LLM server stops
+    bots.start()
+    if CO.is_open():
+        step('guests', lambda: CO.shutdown(wait=min(2.0, max(0.0, end - time.time() - 1.0))))
+    bots.join(max(0.0, end - time.time()))
+    if bots.is_alive():                  # the bot lock did not come in time: at least the llama-server child must not outlive the game
+        log('panel: the bot pack was not saved in time')
+        step('LLM stop', lambda: BOT.ACTIVE is not None and BOT.ACTIVE.llm is not None and BOT.ACTIVE.llm.stop())
+    # the clan changes still waiting for the writer (clan.SAVE_SEC): last, after the bot pack; tens of ms, bounded if the lock is stuck
+    step('clan save', lambda: KL.flush(timeout=max(0.2, end - time.time())))
+    log('panel: stop request, profile saved, server shutting down')
     try:
         os.remove(STOP)
     except OSError:
@@ -1606,4 +1663,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    finally:                      # any other exit (the port is taken, an error): the bot pack is saved, the llama-server child stops
+        BOT.close()

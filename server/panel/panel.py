@@ -21,7 +21,7 @@ on macOS, Automatic is the Wine + DXMT the panel installs itself (wine_engine.py
 downloads, or from the Client page; on Apple Silicon the panel also has Rosetta 2 installed). The window is in Chrome, Edge, Chromium or
 Brave; file dialogs are tkinter on Linux (zenity if absent), AppleScript on macOS (Tk works there only on the main thread); the shortcut
 is a .desktop on Linux, an app bundle (.app) on macOS. """
-import datetime, json, os, re, secrets, shlex, shutil, subprocess, sys, threading, time, traceback
+import base64, datetime, json, math, os, re, secrets, shlex, shutil, subprocess, sys, threading, time, traceback, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 from urllib.error import HTTPError
@@ -166,8 +166,8 @@ ENG = RUN.engine()                                                # macOS: the W
 ENG.log = log
 PATCHER = PATCH.Patcher(log)                                           # BepInEx, which loads the client's fixes (client_patch.py)
 TOKEN = secrets.token_hex(16)
-STATE = {'play': {'running': False, 'steps': [], 'error': None, 'finished': None, 'server_only': False},
-         'heartbeat': time.monotonic(), 'window_closed': False, 'window_watched': False, 'last_backup': 0.0, 'closing': False,
+STATE = {'play': {'running': False, 'steps': [], 'error': None, 'finished': None, 'server_only': False, 'images': False},
+         'images_stop': threading.Event(), 'heartbeat': time.monotonic(), 'window_closed': False, 'window_watched': False, 'last_backup': 0.0, 'closing': False,
          'next_check': time.time() + 8, 'updated': bool({'--updated', '--guncellendi'} & set(sys.argv)), 'srv': None, 'opening': time.time()}
 
 
@@ -251,8 +251,16 @@ def game_settings():
     return SET.read(settings_file())
 
 
+POLL_CACHE_SEC = 5                 # /api/status polls twice a second: the automatic client search (glob, ~14 ms) and event_list (~6 ms)
+_AUTO = {'at': -1e9, 'folder': None}       # are reused this long; "Find automatically", a finished download and a deleted client rescan at once
+
+
 def client_folder():
-    return IST.resolve(CFG.get('client_folder'))
+    if CFG.get('client_folder'):
+        return CFG.get('client_folder')
+    if time.monotonic() - _AUTO['at'] > POLL_CACHE_SEC:
+        _AUTO.update(at=time.monotonic(), folder=IST.resolve(None))
+    return _AUTO['folder']
 
 
 # ------------------------------------------------------------------ in-game menus (Shop)
@@ -275,6 +283,14 @@ def game_channel(route, body=None):
         with urlopen(req, timeout=10) as r:
             return json.load(r)
     except HTTPError as e:
+        try:
+            reason = json.loads(e.read().decode('utf8')).get('error')        # panel_channel's reason (Error(code, message))
+        except (OSError, ValueError, AttributeError):
+            reason = None
+        if reason == 'bots are not on':
+            raise Error(_('The bots are still loading: try again in a moment.'))
+        if reason == 'no such bot':
+            raise Error(_('This bot was added while the game was running: it can be edited once the server restarts.'))
         if e.code == 409:
             raise Error(_('Opens once you have logged in to the game.'))
         raise Error(_('The game server refused the request (%s).', e.code))
@@ -293,6 +309,7 @@ def game_image(name):
 def _downloaded(path):
     """Download finished: if the client in use is invalid or being updated, the new folder is used (if it is found automatically the
     setting stays empty); on update the old folder is deleted."""
+    _AUTO['at'] = -1e9
     old = STATE.pop('old_client', None)
     if old or not IST.check(client_folder())['valid']:
         auto = IST.resolve(None)
@@ -312,6 +329,7 @@ def delete_old_client(old, new_):
         return
     try:
         shutil.rmtree(old)
+        _AUTO['at'] = -1e9
         log('old client deleted: %s' % old)
     except OSError as e:
         log('old client could not be deleted: %s: %r' % (old, e))
@@ -327,6 +345,7 @@ def _dl_pct(st):
 
 _dialog_lock = threading.Lock()
 _settings_lock = threading.RLock()            # settings.json / templates read-modify-write sequences (ThreadingHTTPServer)
+_launch_lock = threading.Lock()               # start_launch's check and claim of STATE['play']
 
 
 def dialog(kind, **kw):
@@ -396,7 +415,23 @@ def running_pass(vals, sel, now):
     return ev, end, bp
 
 
+_EVENTS = {}
+
+
 def event_list():
+    """_event_list for POLL_CACHE_SEC (an event turns on or off by the clock or the save's pass at most that late); a settings write (the
+    file's mtime), another active save or panel language computes it at once."""
+    f = settings_file()
+    try:
+        key = (f, os.stat(f).st_mtime_ns, D.current())
+    except OSError:
+        key = (f, None, D.current())
+    if _EVENTS.get('key') != key or time.monotonic() - _EVENTS['at'] > POLL_CACHE_SEC:
+        _EVENTS.update(key=key, at=time.monotonic(), rows=_event_list())
+    return _EVENTS['rows']
+
+
+def _event_list():
     import event_calendar as CAL
     lang = D.current()
     now = time.time()
@@ -525,7 +560,7 @@ def season_banner(name):
 # fetches the missing ones itself from the official CDN, in the background (user request 2026-11-03). A failed one is not retried while the
 # panel runs (no internet, not on the CDN).
 CDN_OFFICIAL = 'https://darkorbit-22.bpsecure.com/'
-BANNERS = {'names': {}, 'missing': set(), 'thread': None}
+BANNERS = {'names': {}, 'missing': set(), 'thread': None, 'lock': threading.Lock()}
 
 
 def fetch_banners(names):
@@ -553,10 +588,11 @@ def season_banners():
     names = BANNERS['names']
     have = {sid: '/season_banner/%s.jpg' % n for sid, n in names.items() if season_banner(n + '.jpg')}
     todo = [n for sid, n in names.items() if sid not in have and n not in BANNERS['missing']]
-    running = bool(BANNERS['thread'] and BANNERS['thread'].is_alive())
-    if todo and not running:
-        fetch_banners(todo)
-        running = True
+    with BANNERS['lock']:                             # two requests at once: one thread (two wrote the same .part, one died on os.replace)
+        running = bool(BANNERS['thread'] and BANNERS['thread'].is_alive())
+        if todo and not running:
+            fetch_banners(todo)
+            running = True
     return {'banners': have, 'loading': running}
 
 
@@ -613,7 +649,8 @@ def set_events(body):
 
 
 def _set_events(body):
-    vals = game_settings()
+    f = settings_file()                               # once: the active save may change between the read and the write
+    vals = SET.read(f)
     ev = dict(vals.get('events') or {})
     import event_calendar as CAL
     if 'all' in body:
@@ -637,7 +674,8 @@ def _set_events(body):
                 if ev.get(j) == 'on':
                     ev.pop(j)
     vals['events'] = ev
-    SET.write(settings_file(), vals)
+    SET.write(f, vals)
+    _EVENTS.clear()
     return event_list()
 
 
@@ -660,13 +698,16 @@ def try_migrate():
     return moved
 
 
-def warnings(folder=False):
+def warnings(folder=False, table=False):
     out = []
     if STATE.get('migration_pending'):
         out.append({'type': 'warning', 'text': _('The old save (server/save/profil.json) is waiting to be moved into a save slot: first close the '
                                                  'server running outside the panel (Server > Ports).'), 'page': 'server'})
     if migration_error():
         out.append({'type': 'error', 'text': migration_error(), 'page': 'saves'})
+    if SM.stamp_version(PTH.SAVE) > SM.VERSION:      # an older panel on saves a newer one converted: it reads them by the old names
+        out.append({'type': 'error', 'text': _('Your saves are in a newer format (%s) than this panel reads (%s): update the panel before playing, '
+                                               'or progress may be lost.', SM.stamp_version(PTH.SAVE), SM.VERSION), 'page': 'panel'})
     if FRD.active():
         out.append({'type': 'warning', 'text': _("You are on a friend's server (%s): Play is unavailable. Leave from the Play with Friends page.",
                                                FRD.m['address']), 'page': 'friend'})
@@ -680,7 +721,7 @@ def warnings(folder=False):
     elif not c['valid']:
         out.append({'type': 'error', 'text': _('Game client not found: %s Choose its folder or download the game on the Client page.',
                                               ' '.join(c['issues'])), 'page': 'client'})
-    elif c['old']:                                                  # a new version is out: updated with one click (/api/istemci/guncelle)
+    elif c['old']:                                                  # a new version is out: updated with one click (/api/client/update)
         dl, sup = DL.state(), IST.supported()
         run = bool(STATE.get('old_client')) and dl['running']
         if run:
@@ -732,7 +773,7 @@ def warnings(folder=False):
     elif u['state'] == 'installed':
         out.append({'type': 'warning', 'text': _('Update installed: the panel restarts when the game and servers are closed.'), 'page': 'panel'})
     alive = MANAGER.servers_alive()
-    table = PR.listeners()
+    table = PR.listeners() if table is False else table
     foreign = [p for name, ports in PR.PORTS.items() for p in ports if not alive.get(name) and PR.listening(p, table)]
     if foreign:
         out.append({'type': 'warning', 'text': _("A process the panel didn't start is holding the game ports (%s). It may be a server left over from "
@@ -761,9 +802,10 @@ def status():
     ev = [e['name'] for e in event_list() if e['enabled'] and e['type'] == 'yearly']
     slots = SAV.slots()
     folder = client_folder()                     # client folder search (glob) once: warnings and the response
-    return {'processes': MANAGER.status(), 'active': active, 'save_count': len(slots),
+    table = PR.listeners()                       # the port table once too (Linux scans /proc/*/fd, macOS runs lsof)
+    return {'processes': MANAGER.status(table), 'active': active, 'save_count': len(slots),
             'settings_summary': settings_summary(vals), 'events': ev,
-            'warnings': warnings(folder), 'play': STATE['play'], 'client_folder': folder,
+            'warnings': warnings(folder, table), 'play': STATE['play'], 'client_folder': folder, 'readiness': readiness(folder),
             'friend': {'host': MANAGER.running() and MANAGER.friend, 'guest': FRD.m['state'], 'address': FRD.m['address']},
             'multi': multi_status(slots),
             'panel': {'version': VERSION, 'window_closed': STATE['window_closed'], 'lang': CFG.get('lang'), 'platform': sys.platform,
@@ -906,7 +948,7 @@ def launch(server_only=False, friend=False):
         if not MANAGER.running() and CFG.get('rotate_logs'):
             import launcher
             launcher.rotate_logs(PTH.LOGS, names=('gs.log', 'http.log', 'client.log', 'game_console.log', 'web_console.log',
-                                                'panel.log'))
+                                                'panel.log') + (() if os.name == 'nt' else ('wine.log',)))
         _step((_('Starting the friend server') if friend else _('Starting the servers'))
               if not MANAGER.running() or restart else _('Servers running'))
         MANAGER.start_servers(prof, settings_file(slot), control=bool(SET.read(settings_file(slot)).get('control')), slot=slot, friend=friend_env,
@@ -947,10 +989,87 @@ def start_launch(server_only=False, friend=False):
     o = STATE['play']
     if migration_error():
         raise Error(migration_error())
-    if o['running']:
-        raise Error(_('Launch in progress.'))
-    o.update(running=True, steps=[], error=None, finished=None, server_only=bool(server_only))
+    with _launch_lock:                                  # two requests at once (ThreadingHTTPServer) must not both pass the check
+        if o['running']:
+            raise Error(_('Launch in progress.'))
+        o.update(running=True, steps=[], error=None, finished=None, server_only=bool(server_only), images=False)
     threading.Thread(target=launch, args=(server_only, friend), daemon=True).start()
+    return o
+
+
+def readiness(folder):
+    """The Play page's readiness line: client present, BepInEx (the plugin) installed, the game images dumped (character editor, in-game pages,
+    World Editor)."""
+    ok = IST.check(folder)['valid']
+    return {'client': ok, 'plugin': ok and PATCH.installed(folder), 'images': ok and PATCH.images_ready(folder)}
+
+
+def prepare_images():
+    """"Prepare the game images" (Play page): BepInEx if missing, its first-start preparation, then a windowless start in which the plugin dumps
+    the images (client_patch.dump_images); in the launch steps (STATE['play'] with images=True), without servers or a play session. Stopping or
+    failing leaves nothing half ready: every stage's marker file is written last (INSTALL_MARKER, INTEROP, dizin.json)."""
+    o, stop = STATE['play'], STATE['images_stop']
+
+    def check(ok, text):
+        if stop.is_set():
+            raise Error(_('Stopped: the game images were not prepared.'))
+        if not ok:
+            raise Error(text)
+    try:
+        _step(_('Checking'))
+        folder = client_folder()
+        c = IST.check(folder)
+        check(c['valid'], _('Invalid client folder: %s', ' '.join(c['issues'])))
+        if not PATCH.installed(folder):
+            _step(_('Installing BepInEx'))
+            check(True, None)
+            ok = PATCHER.wait(folder, lambda pct: o['steps'][-1].update(text=_('Installing BepInEx: %d%%', pct)))
+            check(ok, _('BepInEx could not be installed: %s', PATCHER.state(folder)['error'] or '?'))
+        cmd, env = IST.command(CFG, folder, os.path.join(PTH.LOGS, 'client.log'))
+        if not PATCH.ready(folder):
+            _step(_('Preparing BepInEx for the first launch (about half a minute)'))
+            check(PATCH.warm_up(folder, cmd, env, PTH.LOGS, lambda d: o['steps'][-1].update(progress=d), stop=stop), _("BepInEx couldn't be prepared"))
+        if not PATCH.images_ready(folder):
+            _step(_('Preparing the game images'))
+            check(PATCH.dump_images(folder, cmd, env, PTH.LOGS, lambda d: o['steps'][-1].update(progress=d), stop=stop),
+                  _('The client closed or took too long before the images were written. They are also made at your next PLAY.'))
+        _step(_('The game images are ready.'), 'done')
+        o['finished'] = time.time()
+    except (Error, RuntimeError, OSError) as e:
+        o['error'] = str(e)
+        _step(str(e), 'error')
+        log('image preparation: %s' % e)
+    except Exception as e:
+        o['error'] = _('Unexpected error: %r', e)
+        _step(o['error'], 'error')
+        log('image preparation: %s' % traceback.format_exc())
+    finally:
+        o['running'] = False
+
+
+def start_images():
+    """Start "Prepare the game images" (only on the user's click; refused while a client is running or a launch is in progress)."""
+    if not IST.check(client_folder())['valid']:
+        raise Error(_('Game client not found: choose its folder or download the game on the Client page.'))
+    if MANAGER.client_alive() or MULTI.live() or IST.running_clients():
+        raise Error(_('Close the game first: the images are made in a separate start of the client.'))
+    o = STATE['play']
+    with _launch_lock:
+        if o['running']:
+            raise Error(_('Launch in progress.'))
+        STATE['images_stop'].clear()
+        o.update(running=True, steps=[], error=None, finished=None, server_only=False, images=True)
+    threading.Thread(target=prepare_images, daemon=True).start()
+    return o
+
+
+def stop_images():
+    """Stop the image preparation: the BepInEx download, the warm-up or the image client (whichever runs); the state goes back to missing."""
+    o = STATE['play']
+    if o['running'] and o['images']:
+        STATE['images_stop'].set()
+        PATCHER.cancel()
+        PATCH.stop_warm_up()
     return o
 
 
@@ -994,7 +1113,7 @@ MANAGER.on_client_exit = on_client_exit
 def idle(strict=False):
     """Can an update be installed: game, servers, launch, client download, protocol tool stopped (strict: no DarkOrbit client the panel
     did not open either; tasklist works)."""
-    busy = (MANAGER.running() or MANAGER.client_alive() or STATE['play']['running'] or DL.running() or ADAPTER.state()['running']
+    busy = (MANAGER.running() or any(MANAGER.servers_alive().values()) or MANAGER.client_alive()      # a lone web server counts too or STATE['play']['running'] or DL.running() or ADAPTER.state()['running']
             or FRD.active() or MULTI.live() or ENG.running() or PATCHER.running() or LLM.running())
     return not busy and not (strict and IST.running_clients())
 
@@ -1073,6 +1192,7 @@ def shutdown():
     try:
         DL.cancel()                                   # download: extracted files stay, then it resumes from where it left off
         ENG.cancel()
+        PATCH.stop_warm_up()                          # BepInEx's hidden warm-up client (window closed during PLAY)
         if not MANAGER.client_alive() and not MULTI.live():
             FRD.shutdown()                             # if on the friend's server, leave (final state to the save)
             MANAGER.stop_servers()
@@ -1117,14 +1237,16 @@ def open_window(url):
     os.makedirs(BROWSER_PROFILE, exist_ok=True)
     return subprocess.Popen([b, '--app=%s' % url, '--user-data-dir=%s' % BROWSER_PROFILE, '--window-size=1360,880',
                              '--no-first-run', '--no-default-browser-check', '--disable-features=Translate,msEdgeSidebarV2',
-                             '--disable-background-mode', '--disable-sync', '--lang=%s' % D.LANGUAGES[D.current()][1]])
+                             '--disable-background-mode', '--disable-sync'] +
+                            # no language chosen yet: the system's, so the wizard's guess (navigator.languages) is the user's, not tr-TR
+                            (['--lang=%s' % D.LANGUAGES[CFG.get('lang')][1]] if CFG.get('lang') in D.LANGUAGES else []))
 
 
 def watch_window(proc):
     STATE['windowed'] = proc
     if sys.platform == 'darwin':
         # on macOS when the window closes the browser (like other apps) stays open in the Dock: the process cannot be waited on. Closing
-        # is detected from the page's close mark and heartbeat (/api/kapandi, ticker; the mark also arrives when the browser is quit);
+        # is detected from the page's close mark and heartbeat (/api/closed, ticker; the mark also arrives when the browser is quit);
         # when the panel closes this process closes too (shutdown)
         return
     STATE['window_watched'] = True
@@ -1232,7 +1354,7 @@ def refresh_shortcut(create=None):
     if sys.platform == 'darwin':                      # OpenOrbit.app copies the icon into itself
         return False
     if os.name == 'nt':
-        p, old = os.path.join(desktop_dir(), SHORTCUT), os.path.join('ui', 'simge.ico').encode('utf-16-le')
+        p, old = os.path.join(desktop_dir(), SHORTCUT), os.path.join('arayuz', 'simge.ico').encode('utf-16-le')
     else:
         p, old = os.path.join(desktop_dir(), 'openorbit.desktop'), b'arayuz/simge.png'
     if not os.path.isfile(p):
@@ -1380,6 +1502,80 @@ def api_settings():
             'saves': [{'id': s, 'name': SAV.meta(s).get('name', s)} for s in SAV.slots() if s != slot]}
 
 
+# ---- sharing a settings template: a short text code (Discord) or a file holding the same code. The code is TEMPLATE_PREFIX (format
+# version) + base64url of zlib-compressed compact JSON {"n": name, "v": {key: value}}; event choices are never part of it. Import checks
+# every value against the settings schema (settings.BY_KEY): unknown keys are dropped, a value of the wrong type is refused, an out-of-range
+# number is clamped like settings.clean; nothing in the code is executed or used as a path.
+TEMPLATE_PREFIX = 'OOT1.'
+TEMPLATE_CODE_MAX = 8000          # characters of a code (a full template is ~1,500); a template file may be at most twice this many bytes
+TEMPLATE_JSON_MAX = 32768         # unpacked bytes (a compression bomb stops here)
+
+
+def template_code(name, values):
+    raw = json.dumps({'n': name, 'v': values}, separators=(',', ':'), ensure_ascii=False).encode('utf8')
+    return TEMPLATE_PREFIX + base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode('ascii').rstrip('=')
+
+
+def template_name(s):
+    return re.sub(r'[\x00-\x1f\x7f]', '', str(s or '')).strip()[:40]
+
+
+def read_template_code(code):
+    """A pasted or imported code -> {'name', 'values', 'dropped' [key], 'clamped' [[key, given, used]], 'refused' [key]}; Error with the reason
+    if it is not a whole, valid code."""
+    code = ''.join(code.split()) if isinstance(code, str) else ''      # line breaks and spaces a chat copy adds
+    if not code:
+        raise Error(_('Paste a settings code first.'))
+    if len(code) > TEMPLATE_CODE_MAX:
+        raise Error(_('This code is too long to be a settings template.'))
+    m = re.fullmatch(r'OOT(\d{1,3})\.([A-Za-z0-9_-]+)', code)
+    if not m:
+        raise Error(_('This is not an OpenOrbit settings code (it starts with %s).', TEMPLATE_PREFIX))
+    if m.group(1) != TEMPLATE_PREFIX[3:-1]:
+        raise Error(_('This code was made by a newer panel (format %s): update the panel to import it.', m.group(1)))
+    try:
+        z = zlib.decompressobj()
+        raw = z.decompress(base64.urlsafe_b64decode(m.group(2) + '=' * (-len(m.group(2)) % 4)), TEMPLATE_JSON_MAX)
+        big, whole = bool(z.unconsumed_tail), z.eof
+        d = None if big or not whole else json.loads(raw.decode('utf8'))
+    except (ValueError, zlib.error):                # base64, truncated stream, UTF-8, JSON (all ValueError but zlib.error)
+        big, d = False, None
+    if big:
+        raise Error(_('This code is too long to be a settings template.'))
+    if not isinstance(d, dict) or not isinstance(d.get('v'), dict):
+        raise Error(_('The code is incomplete or damaged: copy it again in full.'))
+    values, dropped, clamped, refused = {}, [], [], []
+    for k, v in d['v'].items():
+        s = SET.BY_KEY.get(k)
+        if s is None:                               # unknown (another version's setting) or 'events'
+            dropped.append(k[:60])
+            continue
+        num = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        if not (isinstance(v, bool) if s['type'] == 'bool' else num and (s['type'] != 'level' or float(v).is_integer())):
+            refused.append(k)
+            continue
+        values[k] = SET.clean({k: v})[k]
+        if values[k] != v:
+            clamped.append([k, v, values[k]])
+    return {'name': template_name(d.get('n')) or _('Imported settings'), 'values': values, 'dropped': sorted(dropped), 'clamped': clamped,
+            'refused': refused}
+
+
+def template_source(b):
+    """The template to export: a user template by name, or the current settings (b['current'])  -> (name, values)."""
+    if b.get('current'):
+        return _('Shared settings'), {k: v for k, v in game_settings().items() if k in SET.BY_KEY and v != SET.DEFAULTS[k]}
+    p = read_json(TEMPLATES, {}).get(b.get('name'))
+    if not isinstance(p, dict):
+        raise Error(_('Template not found.'))
+    return p.get('name') or b.get('name'), {k: v for k, v in SET.clean(p.get('values') or {}).items() if k in SET.BY_KEY}
+
+
+def import_check(code):
+    r = read_template_code(code)
+    return dict(r, code=''.join(code.split()), count=len(r['values']), exists=r['name'] in read_json(TEMPLATES, {}))
+
+
 def launch_command():
     """The launch command shown on the Client page (with Wine or Proton on Linux and macOS; only the client's if not found)."""
     if os.name == 'nt':
@@ -1413,16 +1609,6 @@ def slot_arg(q):
     if not sid or not SAV.exists(sid):
         raise Error(_('Save not found.'))
     return sid
-
-
-def profile_values(sid):
-    d = read_json(SAV.profile(sid), {})
-    pl, g = d.get('pilot') or {}, d.get('ship') or {}
-    return {'pilot': pl.get('userName', ''), 'credits': pl.get('credits', 0), 'uridium': pl.get('uridium', 0),
-            'honor': pl.get('honourPoints', 0), 'ep': pl.get('ep', 0), 'level': pl.get('level', 1),
-            'hp': g.get('hitPoints', 0), 'max_hp': g.get('hitMax', 0), 'shield': g.get('shield', 0),
-            'shield_max': g.get('shieldMax', 0), 'company': COMPANIES.get(pl.get('factionId'), '?'),
-            'in_use': SAV.in_use(sid)}
 
 
 def worlds_status():
@@ -1616,7 +1802,10 @@ def bot_post(path, b):
                 raise Error(BT.edit_error(ED.EditError(r['error'], r.get('area', ''))))
             from bot import edit as ED
             if any(a in ED.ROSTER_FIELDS for a in value):
+                current = PR.bot_signature(BT.file_path(pid)) == MANAGER.bot      # no other pack change is waiting for a restart
                 BT.bot_personality(pid, no, value)
+                if current:                                 # already live in the game: the pack file's new state needs no restart
+                    MANAGER.bot = PR.bot_signature(BT.file_path(pid))
             return dict(r, catalog=BT.edit_catalog(), live=True)
         return dict(BT.edit_bot(pid, no, value), catalog=BT.edit_catalog(), live=False)
     if path == '/api/bot/llm/provider':          # provider choice: built-in model, OpenAI, Claude ... (bot/llm_provider.py)
@@ -1668,10 +1857,13 @@ def bot_post(path, b):
                  players=player_names(), name_lang_=b.get('name_lang'), special=b.get('special') or '', name_source=b.get('name_source'))
         return bot_get('/api/bot', {'id': pid})
     if path == '/api/bot/name':
+        current = is_pack_running(pid) and PR.bot_signature(BT.file_path(pid)) == MANAGER.bot    # no other change waiting for a restart
         BT.bot_name(pid, int(b.get('no') or 0), b.get('name'), players=player_names())
         if is_pack_running(pid):
             try:
                 game_channel('/bot/name_log', {})           # in the game at once: bot, clans, directories
+                if current:                                 # live: the pack file's new name needs no restart
+                    MANAGER.bot = PR.bot_signature(BT.file_path(pid))
             except Error:
                 pass                                       # not entered the game: applied at the next launch
         return bot_get('/api/bot', {'id': pid})
@@ -1728,8 +1920,6 @@ def h_get(path, q):
         return season_banners()
     if path == '/api/saves':
         return {'entries': SAV.list(), 'active': SAV.active(), 'trash': SAV.deleted(), 'companies': COMPANIES}
-    if path == '/api/save_profile':
-        return profile_values(slot_arg(q))
     if path == '/api/saves/admin':                  # the save's admin settings (character editor)
         return api_save_admin(slot_arg(q))
     if path == '/api/editor':                       # character editor: the save's draft (save_editor.py)
@@ -1758,7 +1948,10 @@ def h_get(path, q):
         if name not in LOGS and not EXTRA_LOG.fullmatch(name):
             raise Error(_('Unknown log.'))
         p = os.path.join(PTH.LOGS, name)
-        n = min(5000, max(50, int(q.get('row', 400))))
+        try:
+            n = min(5000, max(50, int(q.get('row', 400))))
+        except ValueError:
+            raise Error(_('Invalid value: %s', 'row'))
         return {'name': name, 'exists': os.path.isfile(p), 'size': os.path.getsize(p) if os.path.isfile(p) else 0,
                 'lines': PR.tail(p, n), 'entries': [{'name': g, 'size': os.path.getsize(os.path.join(PTH.LOGS, g))
                                                        if os.path.isfile(os.path.join(PTH.LOGS, g)) else None}
@@ -1773,8 +1966,6 @@ def h_get(path, q):
         return dict(UPD.state(), setting=CFG.get('update'), idle=idle())
     if path == '/api/protocol':                     # state of the protocol adaptation (protocol_builds.py)
         return dict(ADAPTER.state(), enabled=IST.supported())
-    if path == '/api/item_list':                 # the save editor's "give item" list
-        return {'items': SAV.loot_list()}
     if path == '/api/game/shop':                  # in-game menus: the shop's list and wallet (panel_channel.py)
         return dict(game_channel('/shop'), visual=bool(game_image('dizin.json')))
     if path == '/api/game/hangar':                  # in-game menus: ships, configs, slots and inventory (?ship=)
@@ -1817,7 +2008,11 @@ def h_post(path, b):
     if path.startswith('/api/bot/'):                # Bots (bots.py)
         return bot_post(path, b)
     if path.startswith('/api/world') or path == '/api/saves/world':      # World Editor (worlds.py)
-        return world_post(path, b)
+        try:
+            return world_post(path, b)
+        except (TypeError, KeyError, AttributeError, IndexError) as e:     # a value of the wrong shape (hand-made request): 400, not 500
+            log('world request refused %s: %s' % (path, traceback.format_exc()))
+            raise Error(_('Invalid value: %s', e))
     if path == '/api/game/buy':                      # in-game menus: buying from the shop (by the same route as the client's request)
         return game_channel('/shop/buy', {k: b.get(k) for k in ('lootId', 'category', 'amount', 'level')})
     if path == '/api/game/shop/subscribe':            # in-game menus: booster subscription
@@ -1840,6 +2035,10 @@ def h_post(path, b):
     # ---- game and servers
     if path == '/api/play':
         return start_launch(b.get('server_only'))
+    if path == '/api/images/prepare':               # Play page: BepInEx + warm-up + the plugin's image dump without playing
+        return start_images()
+    if path == '/api/images/stop':
+        return stop_images()
     if path == '/api/friend/settings':
         world = b.get('world', CFG.get('friend_world')) or ''
         if world and not WLD.var(world):
@@ -1861,6 +2060,8 @@ def h_post(path, b):
     if path == '/api/friend/leave':
         FRD.detach()
         return FRD.state()
+    if path in ('/api/server/stop', '/api/server/restart') and STATE['play']['running']:
+        raise Error(_('Launch in progress.'))      # the launch thread is starting the servers and the client (World Editor / Bots restart too)
     if path == '/api/server/stop':
         if MANAGER.client_alive():
             raise Error(_("The server can't be stopped while the game is running: close the game first."))
@@ -1915,33 +2116,36 @@ def h_post(path, b):
     # ---- game settings
     if path == '/api/settings':
         with _settings_lock:
-            vals = game_settings()
+            f = settings_file()                       # once: the active save may change between the read and the write
+            vals = SET.read(f)
             for k, v in (b.get('values') or {}).items():
                 if k in SET.BY_KEY:
                     vals[k] = v
-            SET.write(settings_file(), vals)
+            SET.write(f, vals)
         write_legacy_upgrade()
         return api_settings()
     if path == '/api/settings/copy':             # another save's settings (event choices included) to the active save
         slot = SAV.active()
         if not slot:
             raise Error(_('No save.'))
-        with _settings_lock:
+        with _settings_lock:                          # not between another request's read and write of this file; the save's admin settings stay
             keep = {k: v for k, v in game_settings().items() if k in ADMIN_KEYS}
             SAV.copy_settings(str(b.get('source') or ''), slot)
-            vals = {k: v for k, v in game_settings().items() if k not in ADMIN_KEYS}
+            f = settings_file()
+            vals = {k: v for k, v in SET.read(f).items() if k not in ADMIN_KEYS}
             vals.update(keep)
-            SET.write(settings_file(), vals)
+            SET.write(f, vals)
         log('settings copied: %s -> %s' % (b.get('source'), slot))
         write_legacy_upgrade()
         return api_settings()
     if path == '/api/settings/reset':
         with _settings_lock:
-            vals = game_settings()
+            f = settings_file()
+            vals = SET.read(f)
             keys = b.get('keys') or [k for k in SET.BY_KEY if k not in ADMIN_KEYS]
             for k in keys:
                 vals.pop(k, None)
-            SET.write(settings_file(), vals)
+            SET.write(f, vals)
         write_legacy_upgrade()
         return api_settings()
     if path == '/api/settings/presets':
@@ -1951,9 +2155,10 @@ def h_post(path, b):
         if preset is None:
             raise Error(_('Preset not found.'))
         with _settings_lock:
-            vals = {k: v for k, v in game_settings().items() if k not in SET.BY_KEY or k in ADMIN_KEYS}     # event choices and admin stay
+            f = settings_file()
+            vals = {k: v for k, v in SET.read(f).items() if k not in SET.BY_KEY or k in ADMIN_KEYS}     # event choices and admin stay
             vals.update({k: v for k, v in preset.items() if k not in ADMIN_KEYS})
-            SET.write(settings_file(), vals)
+            SET.write(f, vals)
         write_legacy_upgrade()
         return api_settings()
     if path == '/api/settings/save_template':
@@ -1972,6 +2177,43 @@ def h_post(path, b):
             user.pop(b.get('name'), None)
             write_json(TEMPLATES, user)
         return api_settings()
+    if path == '/api/settings/export_code':           # a template (or the current settings) as a code to paste in chat
+        name, values = template_source(b)
+        return {'name': name, 'code': template_code(name, values), 'count': len(values)}
+    if path == '/api/settings/export_file':           # the same code in a text file
+        name, values = template_source(b)
+        dest = dialog('save', title=_('Save the settings template'), initialfile=(re.sub(r'[^\w-]+', '_', name).strip('_') or 'template') + '.txt',
+                      defaultextension='.txt', filetypes=[(_('Settings template'), '*.txt')])
+        if not dest:
+            return {'cancelled': True}
+        with open(dest, 'w', encoding='utf8', newline='\n') as fh:
+            fh.write(template_code(name, values) + '\n')
+        return {'route': dest}
+    if path == '/api/settings/import_check':          # what a pasted code would import (shown before importing)
+        return import_check(b.get('code'))
+    if path == '/api/settings/import_file':           # a template file chosen in the dialog -> the same check as a pasted code
+        src = dialog('ac', title=_('Import a settings template'), filetypes=[(_('Settings template'), '*.txt'), (_('All files'), '*.*')])
+        if not src:
+            return {'cancelled': True}
+        try:
+            with open(src, 'rb') as fh:
+                raw = fh.read(2 * TEMPLATE_CODE_MAX + 1)
+        except OSError as e:
+            raise Error(_('Could not read the file: %s', e))
+        if len(raw) > 2 * TEMPLATE_CODE_MAX:
+            raise Error(_('This file is too large to be a settings template.'))
+        return import_check(raw.decode('utf-8-sig', 'replace'))       # a BOM from Notepad does not count
+    if path == '/api/settings/import_template':       # save a checked code as a user template (a name in use only with overwrite)
+        r = read_template_code(b.get('code'))
+        name = template_name(b.get('name')) or r['name']
+        with _settings_lock:
+            user = read_json(TEMPLATES, {})
+            if name in user and not b.get('overwrite'):
+                raise Error(_('A template named "%s" already exists.', name))
+            user[name] = {'name': name, 'description': _('Imported settings'), 'values': r['values']}
+            write_json(TEMPLATES, user)
+        log('settings template imported: %s (%d values)' % (name, len(r['values'])))
+        return dict(api_settings(), imported=name)
     if path == '/api/events':
         return events_page(set_events(b))
     if path == '/api/seasons':
@@ -2015,8 +2257,6 @@ def h_post(path, b):
         if not src:
             return {'cancelled': True}
         return {'id': SAV.import_file(src)}
-    if path == '/api/saves/edit':
-        return {'changed': SAV.edit(slot_arg(b), b.get('values') or {})}
     # ---- character editor (draft: Save writes to the profile, Cancel discards)
     if path == '/api/editor/apply':
         return SAV.editor_apply(slot_arg(b), b.get('ops'))
@@ -2071,6 +2311,7 @@ def h_post(path, b):
         return api_client()
     if path == '/api/client/auto':
         CFG.update({'client_folder': None})
+        _AUTO['at'] = -1e9
         return api_client()
     if path == '/api/update/check':
         UPD.check()
@@ -2167,6 +2408,8 @@ def h_post(path, b):
     if path == '/api/shortcut':
         return {'route': create_shortcut()}
     if path == '/api/close':
+        if STATE['play']['running'] and not b.get('force'):
+            raise Error(_('Launch in progress.'))      # exiting now would leave BepInEx's hidden warm-up client (client_patch.warm_up) running
         if (MANAGER.client_alive() or MULTI.live()) and not b.get('force'):
             raise Error(_('The game is running: close the game first.'))
         MANAGER.stop_client()
@@ -2209,8 +2452,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get('X-Panel-Token') != TOKEN:
             return self._send(403, {'error': _('Invalid token: reopen the panel.')})
         try:
-            out = fn(urlparse(self.path).path, arg)
-        except (Error, SaveError, FriendError, MultiClientError, RuntimeError, ValueError) as e:
+            out = json.dumps(fn(urlparse(self.path).path, arg), ensure_ascii=False).encode('utf8')   # inside: a value that does not
+        except (Error, SaveError, FriendError, MultiClientError, RuntimeError, ValueError) as e:        # serialize is a logged 500, not a dropped reply
             return self._send(400, {'error': str(e)})
         except Exception as e:
             log('API error %s: %s' % (self.path, traceback.format_exc()))
@@ -2248,7 +2491,8 @@ class Handler(BaseHTTPRequestHandler):
                    {'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"})
 
     def do_POST(self):
-        if not self._host_ok():
+        origin = self.headers.get('Origin')         # a browser sends it on every POST: another site's page may not use the token-free routes either
+        if not self._host_ok() or (origin and origin != 'http://' + self.headers.get('Host')):
             return self._send(403, {'error': 'host'})
         u = urlparse(self.path)
         n = int(self.headers.get('Content-Length') or 0)
@@ -2274,6 +2518,9 @@ class Server(ThreadingHTTPServer):
     # from the open window's requests hold the port for half a minute: after an update the new panel could not get the port and opened on
     # another port (the window cannot find it)
     allow_reuse_address = os.name != 'nt'
+    # the page opens ~40 connections in one burst (HTTP/1.0: one per file) while the window keeps polling; with socketserver's backlog of 5
+    # Windows refuses the overflow (ERR_CONNECTION_REFUSED) and one script of the page never loads: its pages stay empty until a refresh
+    request_queue_size = 128
 
 
 def main():

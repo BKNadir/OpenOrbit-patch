@@ -31,7 +31,14 @@ MATCH_MAKING, RUNNING = 0, 1                      # TeamDeathMatchOverviewModule
 WIN, LOSE, NO_LIFES_LEFT, DRAW = 0, 1, 2, 3       # TeamDeathMatchResultScreenCommand.ResultState
 ERR_LEVEL, ERR_NO_MATCH, ERR_ENDED = 0, 2, 3      # ErrorType (1 QUEUE_FULL opens an empty window in the client: never sent)
 PAIRS = {1: (1, 2), 2: (2, 3), 3: (1, 3)}          # match id -> companies (wiki: MMO-EIC, EIC-VRU, MMO-VRU)
+# wiki "Winner stays on map": only if the winners choose to stay; the 1.1.119 protocol has no request for that choice (TDM requests:
+# OverviewInit, Detail, Join, LeaveQueue, DraftConfirmation, Exit), so every finished match is followed by a new one of the same pair
+# (the wiki's "did not choose to stay" branch; adaptation)
 NEAR = 600                                        # the asset's action range (the client's MapAssetActionAvailable, like the CBS)
+# a match / raid whose world stopped (or never came) this long ago with no new one: its bots are released. Only a fallback (the session's
+# end closes them: extra_events.close); long enough for a slow map load, since in friend mode another session's tick sweeps a loading one
+ORPHAN_SEC = 300
+LIVE = {}                                         # id(owner) -> [world getter, release, orphaned since]: holders of drafted bots (sweep)
 
 
 def mod(_name, **f):
@@ -99,35 +106,29 @@ def state(p, now=None):
     return st
 
 
+def mkey(band_map, mid):
+    return '%d_%d' % (int(band_map), mid)
+
+
 def sim(st, now, own=None):
-    """The matches the player is not in (bot teams): MATCH_MAKING for a few minutes, then RUNNING for at most 15 minutes or 100 points; the
-    finished match's points go to the companies' event score. own: the player's match id (not simulated)."""
-    rng = random.Random()
-    for mid in PAIRS:
-        m = st['matches'].setdefault(str(mid), {'state': MATCH_MAKING, 'until': now + rng.uniform(30, 240), 'queue': [0, 0]})
-        if mid == own:
-            continue
-        if now - m.get('seen', now) > 1800:              # the server was off: the matches start over (no score from the gap)
-            m.update(state=MATCH_MAKING, until=now + rng.uniform(30, 240), queue=[0, 0])
-        m['seen'] = now
-        for _ in range(4):
-            if m['state'] == MATCH_MAKING:
-                m['queue'] = [min(D['team_max'], int(D['team_max'] * (1 - (m['until'] - now) / 300.0) + rng.random())) for _ in (0, 1)]
-                m['queue'] = [max(0, q) for q in m['queue']]
-                if now < m['until']:
-                    break
-                m.update(state=RUNNING, start=m['until'], end=m['until'] + D['match_sec'], rates=[rng.uniform(0.03, 0.10), rng.uniform(0.03, 0.10)],
-                         points=[0, 0], size=[rng.randint(D['team_min'], D['team_max']) for _ in (0, 1)])
-            if m['state'] == RUNNING:
-                t = min(now, m['end']) - m['start']
-                m['points'] = [min(D['max_score'], int(r * t)) for r in m['rates']]
-                if now < m['end'] and max(m['points']) < D['max_score']:
-                    break
-                a, b = PAIRS[mid]
-                st['overall'][str(a)] += m['points'][0]
-                st['overall'][str(b)] += m['points'][1]
-                m.update(state=MATCH_MAKING, until=max(now, m['end']) + rng.uniform(120, 360), queue=[0, 0])
-                m.pop('rates', None)
+    """The matches the player is not in: the bot pilots' own queues and matches (bot/modes.py pvp_rows) of both bands, as lobby rows
+    st['matches'][mkey(band map, match id)] = {state, queue [side a, side b], start, end, size, points}; no bot queue: an empty standby.
+    A bot match's final points go to the companies' event score once, at its end. own: unused (the player's match is shown from itself)."""
+    import bot.modes as MD
+    for b in D.get('brackets', []):
+        rows = MD.pvp_rows('tdm', b['map'], now)
+        for mid, pair in PAIRS.items():
+            m = st['matches'].setdefault(mkey(b['map'], mid), {})
+            r = rows.get(mid)
+            if r is not None and r['state'] == RUNNING:
+                if now >= r['end'] and m.get('settled') != r['start']:          # over: its points count for the event, once
+                    for c in pair:
+                        st['overall'][str(c)] += int(r['points'].get(c, 0))
+                    m['settled'] = r['start']
+                m.update(state=RUNNING if now < r['end'] else MATCH_MAKING, start=r['start'], end=r['end'], queue=[0, 0],
+                         size=[int(r['size'].get(c, 0)) for c in pair], points=[int(r['points'].get(c, 0)) for c in pair])
+            else:
+                m.update(state=MATCH_MAKING, queue=[int((r or {}).get('queue', {}).get(c, 0)) for c in pair])
     return st
 
 
@@ -162,16 +163,25 @@ def pick_bots(company, b, level, now, taken):
     if y is None or not y.permission('pvp'):
         return []
     band, rest = [], []
-    with y.lock:
-        for x in y.bots:
-            busy = x.target is not None and x.target.name in ('gate', 'mod', 'duel', 'pvp_match') and not x.plan.get('finished')
+    # read only: under the bot lock if it is free within 20 ms, otherwise as the world thread reads bots elsewhere (each field once):
+    # the world loop waited here behind a bot tick of up to a second (audit 2026-11-22)
+    held = y.lock.acquire(timeout=0.02)
+    try:
+        for x in list(y.bots):
+            t = x.target
+            busy = t is not None and t.name in ('gate', 'mod', 'duel', 'pvp_match') and not x.plan.get('finished')
             if x.company != company or x.dead_until > now or busy or x.uid in taken:
                 continue
             (band if b['min_level'] <= x.level <= b['max_level'] else rest).append(x)
-    random.shuffle(band)
-    band.sort(key=lambda x: not x.online)            # those online first; offline ones log in for the event
+    finally:
+        if held:
+            y.lock.release()
+    import bot.modes as MD
+    # online ones first (offline ones log in for the event), then those who played the fewest matches in the last hour (a small band
+    # drew the same pilots again and again)
+    band.sort(key=lambda x: (not x.online, MD.recent_matches(x, now), random.random()))
     lv = level
-    rest.sort(key=lambda x: (abs(x.level - lv), not x.online, random.random()))
+    rest.sort(key=lambda x: (abs(x.level - lv), MD.recent_matches(x, now), not x.online, random.random()))
     return band + rest                               # too few pilots in the band (a young bot pack): the nearest levels fill in (adaptation)
 
 
@@ -180,22 +190,25 @@ def draft_bots(bots, map_id, now, hold_sec):
     its spawns) with the pvp_match goal (the brain keeps it until the match ends), their session lasts at least hold_sec."""
     import bot.manager as MGR
     from bot import abstract_sim as S
+    from bot import ship as BS
     from bot.brain import GOALS
     y = MGR.ACTIVE
-    with y.lock:
-        for b in bots:
-            if not b.online:
-                y.entry(b, now, silent=True)
-            if b.body is not None and b.body.alive:
-                b.body.alive = False                   # its ship on another map goes (that world removes it)
-            b.body = None
-            S.jump_to(b, map_id, y, now)
-            b.k['x'] = b.k['y'] = 0
-            b.en_route = None
-            b.target, b.goal_start, b.plan = GOALS['pvp_match'], now, {'min': 3600 * 3, 'match': map_id}
-            b.k['target'] = 'pvp_match'
-            b.session_end = max(b.session_end, now + hold_sec)
-            b.__dict__.pop('carry', None)
+
+    def draft(b):
+        if not b.online:
+            y.entry(b, now, silent=True)
+        if b.body is not None and b.body.alive:
+            b.body.alive = False                   # its ship on another map goes (that world removes it)
+        b.body = None
+        S.jump_to(b, map_id, y, now)
+        b.k['x'] = b.k['y'] = 0
+        b.en_route = None
+        b.target, b.goal_start, b.plan = GOALS['pvp_match'], now, {'min': 3600 * 3, 'match': map_id}
+        b.k['target'] = 'pvp_match'
+        b.session_end = max(b.session_end, now + hold_sec)
+        b.__dict__.pop('carry', None)
+    for b in bots:                                   # at once if the bot lock is free, else queued (the bot is not ticked meanwhile and
+        BS.bots_do(y, b, lambda b=b: draft(b))       # the map's ship sync runs the queue first): the world loop does not wait
 
 
 def release_bots(w, bots, map_id, event):
@@ -211,18 +224,43 @@ def release_bots(w, bots, map_id, event):
         for n in [n for n in w.npcs.values() if n.bot is not None and n.id in uids]:
             msgs += BS.remove(w, n)
     if y is not None:
-        with y.lock:
-            for b, f in bots:
-                b.plan['finished'] = True
-                b.target = None
-                b.k['target'] = None
-                b.__dict__.pop('carry', None)
-                if int(b.k['map']) == int(map_id):
-                    S.jump_to(b, K.ev(b.company), y, time.time())
-                b.next_decision = time.time()
-                b.event(event, **f)
+
+        def release(b, f, now=time.time()):
+            b.plan['finished'] = True
+            b.target = None
+            b.k['target'] = None
+            b.__dict__.pop('carry', None)
+            if int(b.k['map']) == int(map_id):
+                S.jump_to(b, K.ev(b.company), y, now)
+            b.next_decision = now
+            b.event(event, **f)
+        for b, f in bots:                            # at once if the bot lock is free, else queued (as draft_bots)
+            BS.bots_do(y, b, lambda b=b, f=f: release(b, f))
     if w is not None and msgs:
         w.send(msgs)
+
+
+def hold(owner, world, release):
+    """owner (a TDM / SC match, a CTB raid) holds drafted bots: world() its world (None before the map), release() frees them."""
+    LIVE[id(owner)] = [world, release, None]
+
+
+def unhold(owner):
+    LIVE.pop(id(owner), None)
+
+
+def sweep(now):
+    """Holders whose session is gone (logout or disconnect in a match, during its map load or on the result screen): the world stopped
+    (or never came) and no new world took the match over within ORPHAN_SEC -> release; otherwise the drafted bots keep the pvp_match goal
+    forever (frozen on the mode map, never drafted again). From every session's tick."""
+    for key, e in list(LIVE.items()):
+        w = e[0]()
+        if w is not None and not w.stopped:
+            e[2] = None
+        elif e[2] is None:
+            e[2] = now
+        elif now - e[2] >= ORPHAN_SEC and LIVE.pop(key, None) is e:
+            e[1]()
 
 
 # ------------------------------------------------------------------------------------------------ the session's system
@@ -238,6 +276,7 @@ class TeamDeathmatch:
         self.queue = None             # {'own': [bots], 'opp': [bots], 'at': t, 'next': t, 'draft': t or None}
         self.match = None             # the running Match
         self.near = None              # the asset in range (battlemaster / exit point)
+        self.shown = None             # the X-1 world whose client has the battlemaster (the calendar can switch it while there)
         self.pending = None           # after the result: (time, function) back to base
 
     # ------------------------------------------------------------ lobby
@@ -256,7 +295,7 @@ class TeamDeathmatch:
         for mid, pair in PAIRS.items():
             if c not in pair:
                 continue
-            m = st['matches'][str(mid)]
+            m = st['matches'][mkey(b['map'], mid)]
             side = pair.index(c)
             opp = pair[1 - side]
             if mid == self.queued and self.queue is not None:
@@ -293,7 +332,7 @@ class TeamDeathmatch:
         if pair is None or c not in pair:
             return [('TeamDeathMatchErrorCommand', {'errorType': ERR_NO_MATCH})]
         side = pair.index(c)
-        m = st['matches'][str(mid)]
+        m = st['matches'][mkey((bracket(self.level()) or D['brackets'][0])['map'], mid)]
         own_n = opp_n = 0
         pts, left = [0, 0], D['match_sec']
         if self.match is not None and self.match.mid == mid:
@@ -330,20 +369,15 @@ class TeamDeathmatch:
         self.queued = mid
         self.queue = {'own': [], 'opp': [], 'at': now, 'next': now + random.uniform(*D['queue_fill_sec']), 'draft': None,
                       'band': b['map'], 'opp_company': pair[1 - pair.index(self.company())]}
+        import bot.modes as MD
         st = sim(state(self.p, now), now)
-        m = st['matches'][str(mid)]
-        if m['state'] == RUNNING and now - m.get('start', 0) < 30:      # it began just as the pilot joined (the lobby showed it waiting)
-            m.update(state=MATCH_MAKING, until=now + 300)
-            m.pop('rates', None)
+        m = st['matches'][mkey(b['map'], mid)]
         if m['state'] == RUNNING:
-            self.queue['wait'] = m['end']               # the match runs: the queue waits for its end (Detail shows the time left)
-        else:                                           # the pilots already queued (the lobby row) stay: real bots take their places
-            side = pair.index(self.company())
-            have = m.get('queue', [0, 0])
-            for key, company, n in (('own', self.company(), min(have[side], D['team_max'] - 1)),
-                                    ('opp', self.queue['opp_company'], min(have[1 - side], D['team_max']))):
-                taken = {x.uid for x in self.queue['own'] + self.queue['opp']}
-                self.queue[key] += self.candidates(company, b, now, taken)[:n]
+            self.queue['wait'] = m['end']               # the bots' match runs: the queue waits for its end (Detail shows the time left)
+        else:                                           # the bots waiting for this match (the lobby row) come into the player's queue
+            took = {c: [x for x in v if x.dead_until <= now] for c, v in MD.pvp_take('tdm', b['map'], mid).items()}
+            self.queue['own'] = took.get(self.company(), [])[:D['team_max'] - 1]
+            self.queue['opp'] = took.get(self.queue['opp_company'], [])[:D['team_max']]
         self.log('   TDM: queued for match %d (%s)' % (mid, H.name(b['map'])))
         return [self.overview(), (stm('tdm_queue_position', '%POSITION%', 1))]
 
@@ -407,7 +441,7 @@ class TeamDeathmatch:
         q = self.queue
         if q is None or q['draft'] is None:
             return []
-        if not accepted:
+        if not accepted or self.world is not None and self.world.hero_dead:      # dead: the jump would bring a 0 HP ship to the match
             self.leave_queue()
             return [self.overview()]
         return self.start()
@@ -448,7 +482,7 @@ class TeamDeathmatch:
     # ------------------------------------------------------------ world
     def attach(self, world):
         self.world = world
-        self.near = None
+        self.near = self.shown = None
         msgs = []
         if world.gate is not None and self.queue is not None and not on_map(world.map_id):
             self.leave_queue()                            # a gate or mode map: the queue is cancelled (wiki)
@@ -466,9 +500,26 @@ class TeamDeathmatch:
             self.match.close('left')
             self.match = None
         if active() and int(world.map_id) in x1_maps().values() and world.station:
-            x, y = battlemaster_pos(world.station, world.map_w, world.map_h)
-            msgs.append(asset_cmd(ASSET_BASE + int(world.map_id), BATTLEMASTER, x, y, 'Team Deathmatch'))
+            msgs += self.x1_msgs(world)
+            self.shown = world
         return msgs
+
+    def resend_msgs(self, w):
+        """world.resend: the client cleared the map (the free TDM repair at the spawn, a ship change): the exit points of the match again
+        (the status window follows with on_ready), or the X-1 battlemaster."""
+        if w is not self.world:
+            return []
+        self.near = None                                 # the exit point / battlemaster marker again at the next near_step
+        g = self.match
+        if on_map(w.map_id):
+            return [m for m in g.enter_msgs() if m[0] == 'AssetCreateCommand'] if g is not None and not g.over and g.w is w else []
+        return self.x1_msgs(w) if self.shown is w else []
+
+    def x1_msgs(self, w, on=True):
+        x, y = battlemaster_pos(w.station, w.map_w, w.map_h)
+        if on:
+            return [asset_cmd(ASSET_BASE + int(w.map_id), BATTLEMASTER, x, y, 'Team Deathmatch')]
+        return [('AssetRemoveCommand', {'assetType': mod('AssetTypeModule', typeValue=BATTLEMASTER), 'uid': ASSET_BASE + int(w.map_id)})]
 
     def on_ready(self):
         """The map is loaded (ReadyRequest): the match's status window can open now."""
@@ -480,6 +531,7 @@ class TeamDeathmatch:
 
     def tick(self, now):
         msgs = []
+        sweep(now)
         st = state(self.p, now)
         if active(now):
             sim(st, now, self.own_match())
@@ -491,8 +543,12 @@ class TeamDeathmatch:
         else:
             if self.queue is not None:
                 self.leave_queue()
-            msgs += self.settle(st, now)
+            if self.match is None or self.match.over:      # a match still running counts first (finish / close add its points)
+                msgs += self.settle(st, now)
         w = self.world
+        if w is not None and int(w.map_id) in x1_maps().values() and w.station and (self.shown is w) != active(now):
+            msgs += self.x1_msgs(w, not self.shown)      # the event began / ended while the pilot is on X-1
+            self.shown = None if self.shown else w
         if w is not None and not w.hero_dead:
             msgs += self.near_step(w, now)
         return msgs
@@ -564,6 +620,7 @@ class Match:
         self.player = {'name': name, 'company': own, 'bot': None, 'kills': 0, 'deaths': 0, 'lives': D['lives'], 'given': 0, 'taken': 0,
                        'peak': 0, 'streak': 0, 'best': 0, 'respawn': 0}
         self.enroll(own_bots + opp_bots, now)
+        hold(self, lambda: self.w, lambda: self.close('orphaned'))
 
     # ------------------------------------------------------------ roster
     def enroll(self, bots, now):
@@ -678,35 +735,9 @@ class Match:
 
     # ------------------------------------------------------------ bots
     def bot_think(self, w, n, now):
-        """The drafted bot's ship: still at the spawn in the start phase; then on the nearest enemy (the player or an enemy bot); the body's
-        default combat (approach, fire, abilities) does the rest. -> True when the match moved it (the default behavior is skipped)."""
-        from bot import ship as BS
-        if self.over:
-            return True
-        if now < self.attack_at:
-            BS._stop(w, n, now)
-            return True
-        t = n.target
-        if t is not None and (t == w.hid and not w.hero_dead or t in w.npcs and w.npcs[t].alive and w.npcs[t].bot is not None):
-            return False
-        nx, ny = n.mover.pos(now)
-        best = None
-        if (not w.hero_dead and int(self.p.d['pilot'].get('factionId') or 0) != n.bot.company
-                and BS.can_attack_player(w, n, w, now)):
-            hx, hy = w.hero_pos(now)
-            best = (math.hypot(hx - nx, hy - ny), w.hid)
-        for m in w.npcs.values():
-            if m.bot is None or m is n or not m.alive or m.bot.company == n.bot.company:
-                continue
-            mx, my = m.mover.pos(now)
-            d = math.hypot(mx - nx, my - ny)
-            if (best is None or d < best[0]) and BS.can_attack_bot(w, n, m, now):
-                best = (d, m.id)
-        if best is not None:
-            n.target = best[1]
-            return False
-        BS._go_to(w, n, w.map_w // 2 + random.randint(-800, 800), w.map_h // 2 + random.randint(-600, 600), now)
-        return True
+        """The drafted bot's ship: bot/tactics.py steers it. -> True when the match moved it (the default behavior is skipped)."""
+        from bot import tactics as TT
+        return TT.tdm_think(self, w, n, now)
 
     def on_bot_spawn(self, n, now):
         """A drafted bot's ship appears at its team's spawn: full HP, attack protection in the start phase or for 20 s after a respawn."""
@@ -839,18 +870,16 @@ class Match:
         st = state(self.p)
         st['overall'][str(self.own)] += a
         st['overall'][str(self.opp)] += b
-        m = st['matches'].get(str(self.mid))
-        if m is not None:
-            m.update(state=MATCH_MAKING, until=now + random.uniform(120, 360), queue=[0, 0], seen=now)
         self.p.dirty = True
         self.w.log('   TDM: match over %d:%d (%s)' % (a, b, {WIN: 'won', LOSE: 'lost', DRAW: 'draw'}[state_]))
         if not self.result_sent:
             self.result_sent = True
             rewards = [] if no_opponent or getattr(self, 'paid', False) else self.pay()       # no opponents for 30 s: no reward (wiki)
             self.w.send([self.status_cmd(now), self.result_cmd(state_, rewards)])
-        self.release()
+        self.release({WIN: self.own, LOSE: self.opp}.get(state_))
         w = self.w
-        w.later(D['result_sec'], lambda: self.m.match is self and w.running and self.m.home())
+        # dead (no lives left, removed, or killed at the end): the death screen's X-1 repair takes them home (a jump would bring a 0 HP ship)
+        w.later(D['result_sec'], lambda: self.m.match is self and w.running and not w.hero_dead and self.m.home())
 
     def result_cmd(self, result, rewards):
         def row(s):
@@ -868,9 +897,12 @@ class Match:
             rewards=[mod('RewardModule', lootId=l, amount=int(n)) for l, n in rewards],
             hint=mod('HintModule', messageKey=hint, replacements=[])))
 
-    def release(self):
-        """The drafted bots leave the TDM map: their ships go, they return to their X-1 and decide again."""
-        release_bots(self.w, [(s['bot'], dict(kills=s['kills'], deaths=s['deaths'])) for s in self.stats.values()], self.map, 'tdm_done')
+    def release(self, winner=None):
+        """The drafted bots leave the TDM map: their ships go, they return to their X-1 and decide again. winner: the company that won (the
+        end's result; a draw: nobody; closed early: the side ahead then), the release event's won (bot/modes.after_match)."""
+        unhold(self)
+        release_bots(self.w, [(s['bot'], dict(kills=s['kills'], deaths=s['deaths'], won=s['company'] == winner))
+                              for s in self.stats.values()], self.map, 'tdm_done')
         self.stats_released = True
         if self.w is not None:
             self.w.mode_bots = None
@@ -882,9 +914,7 @@ class Match:
             st = state(self.p)
             st['overall'][str(self.own)] += self.score[self.own]
             st['overall'][str(self.opp)] += self.score[self.opp]
-            m = st['matches'].get(str(self.mid))
-            if m is not None:
-                m.update(state=MATCH_MAKING, until=time.time() + random.uniform(120, 360), queue=[0, 0], seen=time.time())
             self.p.dirty = True
-        if not getattr(self, 'stats_released', False):
-            self.release()
+        if not getattr(self, 'stats_released', False):        # left early (exit, X-1 repair, logout): the side ahead won, a tie nobody
+            a, b = self.score[self.own], self.score[self.opp]
+            self.release(self.own if a > b else self.opp if b > a else None)

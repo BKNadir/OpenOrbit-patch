@@ -155,9 +155,12 @@ def farm(bot, dt, y, target_kind=None):
         death(bot, y, reason='npc', now=y.now if y is not None else None)
 
 
-def x1_cut(bot):
-    """At high level in their own X-1 the reward shrinks (npc.json x1_odul; world.World.grant_loot)."""
-    if H.map_class(bot.game_map) != 'X-1' or H.company(bot.game_map) != bot.company:
+def x1_cut(bot, m=None):
+    """At high level in their own X-1 (m: that map instead of the current one) the reward shrinks (npc.json x1_reward;
+    world.World.x1_reward, the same x1_cargo setting)."""
+    m = bot.game_map if m is None else m
+    import settings as SET
+    if H.map_class(m) != 'X-1' or H.company(m) != bot.company or not SET.get('x1_cargo'):
         return 1.0
     return next((k for l, k in reversed(K.COMBAT['x1_reward']) if bot.level >= l), 1.0)
 
@@ -264,16 +267,47 @@ def encounter(a, b, y, now=None):
     pa = 0.08 + 0.84 * pa                          # a surprise is always possible
     winner, loser = (a, b) if a.r.random() < pa else (b, a)
     pvp_reward(winner, loser, y, now)
+    strife(winner, loser, now)
     death(loser, y, reason='player', killer=winner.name, now=now)
     return ('won', winner, loser)
 
 
+def strife(winner, loser, now):
+    """Galactic Strife: a bot-bot kill on its maps moves both reputations as a player's kill does (galactic_strife.settle), so a bot
+    the player meets there has the reputation its fights earned (the player's gain against it depends on it)."""
+    import galactic_strife as GS
+    if not GS.active(now) or not GS.on_map(winner.game_map):
+        return
+    from . import society as TB
+    GS.settle([(TB.profile(winner), 1.0)], TB.profile(loser), now)
+    from . import modes as MD
+    MD.strife_milestones(winner, now)                 # a milestone its reputation just reached pays at once (as the player's)
+
+
+def kill_reward(winner, victim_uid, ship, now):
+    """(EP, honor) of a PvP kill by the player's own rule (player_combat.on_kill): the wikis' destroy reward of the victim's ship
+    (player_combat.destroy_reward: Phoenix 100/0 ... Goliath 51,200/512), 15% less for each kill of the same victim past 5 a day
+    (pushing), none at 0. The abstract bot-bot kill, the concrete one and a bot killing the player all pay by it."""
+    import ranks as RT
+    import player_combat as PC
+    C = K.ITEMS['player_kill']
+    g = winner.k.setdefault('pvp_daily', {})
+    day = RT.today(now)
+    if g.get('day') != day:
+        g.clear()
+        g['day'] = day
+    v = g.setdefault('victim', {})
+    v[str(victim_uid)] = n = v.get(str(victim_uid), 0) + 1
+    f = max(0.0, 1 - C['push_step'] * max(0, n - C['push_threshold']))
+    ep, honor = PC.destroy_reward(ship)
+    return int(ep * f), int(honor * f)
+
+
 def pvp_reward(winner, loser, y, now):
-    """Honor and EP of a kill (items.json player_kill: honor 100 x, EP 1,000 x the victim's ship score; roughly with level)."""
-    kill_rewards = K.ITEMS['player_kill']
-    multiplier = max(1, loser.level // 2)
+    """Honor and EP of a bot's kill of another bot (kill_reward)."""
+    ep, honor = kill_reward(winner, loser.uid, loser.k['gear']['ship'], now)
     speed = y.speed(winner) if y is not None else 1.0
-    winner.reward(None, speed, ep=kill_rewards['ep_points'] * multiplier, honor=kill_rewards['honor_points'] * multiplier)
+    winner.reward(None, speed, ep=ep, honor=honor)
     winner.ist('player')
     from . import society as TB
     winner.ist('player_points', TB.ship_rank_points(loser.k['gear']['ship']))

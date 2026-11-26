@@ -15,7 +15,7 @@ import json, os, struct, zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SPEC_PATH = os.path.join(HERE, 'data', 'protocol_read.json')
-CLIENT_HASH = '0b64b1b04d103c9ec4b4f121acb7de36'   # the client protocol_read.json was extracted from (1.1.115; the same in 1.1.116 and 1.1.117) VersionRequest value
+CLIENT_HASH = '56efb18becec3a2f2fb0412dfc20c2fb'   # VersionRequest value of the client protocol_read.json was extracted from (1.1.119)
 SECRET_FIELDS = ('sessionid', 'password', 'token', 'secret')
 
 # fields whose conversion read_spec.py could not find (by hand from the disassembly of the client's read(): the raw value is rotated right by a bits)
@@ -281,6 +281,8 @@ def _enc_prim(out, t, x, v, name=None):
         out += struct.pack('>d', float(v))
     elif t == 'string':
         d = (v or '').encode('utf8')
+        if len(d) > 32767:          # the client reads the length as Int16: a longer string goes negative and breaks the read
+            raise EncodeError('string %s is %d bytes; the client reads at most 32767' % (name or t, len(d)))
         out += struct.pack('>H', len(d)) + d
     elif t == 'module':
         if v is None:
@@ -447,7 +449,9 @@ class Framer:
         out = []
         while True:
             hdr = 3
-            if self.client_side and self.first and len(self.buf) >= 6 and self.buf[0] == 0 and self.buf[4:6] == b'\x02\x9a':
+            if self.client_side and self.first and len(self.buf) < 6:
+                break     # the first packet split by TCP: its 4-byte length cannot be told apart yet (it was read as a 3-byte one)
+            if self.client_side and self.first and self.buf[0] == 0 and self.buf[4:6] == b'\x02\x9a':
                 hdr = 4   # VersionRequest (666) comes with a 4-byte length
             if len(self.buf) < hdr:
                 break

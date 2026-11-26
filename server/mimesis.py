@@ -39,7 +39,6 @@ FREIGHTER = 'mm_freighter'
 POI_ZONE = 'payloadEscortProtectionZone'
 RANK_TYPE = 5
 KEY = D.get('key', 'resource_key_access-escort')
-RUN_SEC = 3600
 BYTE = 'resource_collectable_byte-remnant'
 
 
@@ -53,9 +52,21 @@ def _register():
     if g:
         world_module.CFG['types'][FREIGHTER] = dict(name=g['name'], model=g['model'], npc_id=g['npc_id'], hp=g['min_hp'], shield=0,
                                               damage=0, speed=g['speed'], aggressive=False, friendly=True, reward={}, cargo={})
-    if D.get('ranking'):
-        RK.TABLES[RANK_TYPE] = {'ranges': [dict(from_=r['from_'], e=r['e'], items=r['rewards'], title=r.get('title'))
-                                              for r in D['ranking']]}
+    edition()
+
+
+def edition(now=None):
+    """The ranking table of the edition running at `now` (data 'editions' by month: the November 2026 edition gives the Guardian Goliath
+    Plus design and the 202611 titles instead of the March edition's Retiarus Plus Asimov and 202603 titles) -> RK.TABLES."""
+    if not D.get('ranking'):
+        return None
+    month = datetime.datetime.fromtimestamp(now or time.time()).month
+    ed = (D.get('editions') or {}).get(str(month), {})
+    swap = {D['ranking'][0]['rewards'][0][0]: ed['design']} if ed.get('design') else {}
+    titles = dict(ed.get('titles') or {})
+    RK.TABLES[RANK_TYPE] = t = {'ranges': [dict(from_=r['from_'], e=r['e'], items=[[swap.get(l, l), n] for l, n in r['rewards']],
+                                                title=titles.get(r.get('title'), r.get('title'))) for r in D['ranking']]}
+    return t
 
 
 _register()
@@ -181,20 +192,32 @@ class Mimesis:
         go(self.my_map(), (x - 600, y + 300))
 
     # ------------------------------------------------------------ world
+    def leave_run(self):
+        """Left the map mid-run (another map, the base repair, logout): the run's score stays (kept even on a failed run; the key is spent);
+        a run that already arrived keeps its success (its 5 s explosion timer goes with the world)."""
+        r, self.run = getattr(self, 'run', None), None
+        if r is None or r.phase == 'finished' or not r.score:
+            return []
+        success, r.phase = r.phase == 'arrival', 'finished'
+        return self.finish_run(r.score, success)
+
     def attach(self, world):
         self.world = world
-        self.run = None
-        msgs = []
+        msgs = self.leave_run()
         if int(world.map_id) in MAPS and active() and getattr(self, 'pending', None):
             key, end = self.pending
             self.pending = None
+            if world.labyrinth is not None:          # the Escort maps are Frozen Labyrinth map numbers: the session set the labyrinth up
+                world.labyrinth.close()
             self.run = MmRun(self, world, end)
             world.gate = self.run
             world.ally = self.run
             self.in_map = True
-            return [self.info_cmd(True)] + self.run.enter_msgs()
+            return msgs + [self.info_cmd(True)] + self.run.enter_msgs()
         if int(world.map_id) in MAPS:                       # no run (spawned on this map at login): to base
-            import vortex
+            if world.labyrinth is not None and not CAL.is_active(EKP.LAB['event']):
+                world.labyrinth.close()                     # a relog after an escort run: outside its event this map is no labyrinth
+            import vortex                                   # (send_home leaves a labyrinth alone)
             vortex.send_home(self, world)
         if self.in_map:
             self.in_map = False
@@ -208,12 +231,16 @@ class Mimesis:
 
     def tick(self, now):
         if not active(now):
+            r = self.run                 # adaptation: a run that began while the event was on finishes under the rules it began with:
+            if r is not None and r.phase != 'finished' and self.world is not None and self.world.gate is r:
+                return []                # its trip counts and the edition's ranking is paid after it
             return self.event_end()
         msgs = []
         if self.st.get('period') is None:
             with self.p.lock:
                 self.st['period'] = (CAL.period(EVENT, now) or (now,))[0]
                 self.p.dirty = True
+            edition(now)
         open_ = run_state(now)[1]
         if open_ != self.last_open:
             if self.last_open is not None and open_ and not always_open():
@@ -265,7 +292,9 @@ class Mimesis:
     def finish_run(self, score, success):
         msgs = []
         with self.p.lock:
-            self.st['trips'] = sorted(self.st['trips'] + [int(score)], reverse=True)[:50]
+            if active() or (self.p.d.get('mimesis') or {}).get('period') is not None:   # the edition is not closed yet (tick waits
+                # for a run in progress); a run that ends after event_end must not count toward the next edition
+                self.st['trips'] = sorted(self.st['trips'] + [int(score)], reverse=True)[:50]
             self.p.dirty = True
         if success:
             row = next((r for r in D['trip_tiers'] if score >= r['from_'] and (r['e'] is None or score <= r['e'])), None)
@@ -284,7 +313,7 @@ class Mimesis:
         msgs = []
         total = sum(sorted(st.get('trips', []), reverse=True)[:D.get('best_trip_count', 10)])
         if total > 0:                             # end-of-event ranking reward (single player: 1st)
-            r = RK.TABLES[RANK_TYPE]['ranges'][0]
+            r = edition(st['period'])['ranges'][0]
             for loot, n in r['items']:
                 msgs += self.m.prize(loot, n)
             if r.get('title') and self.titles:
@@ -329,13 +358,15 @@ class MmRun:
     def npcs(self):
         return set(self.wave)
 
-    def wave_name(self):
-        return self.phase
-
     def enter_msgs(self):
         self.spawn_ship()
         self.spawn_wave(D['waves']['start'], near=D['route'][0])
         return [self.score_cmd(), self.zone_poi()]
+
+    def resend_msgs(self):
+        """world.resend (respawn on the spot, a ship change): the protection zone's POI (otherwise only the freighter's next move sent it;
+        a pilot who respawned outside it never saw it). It is removed when the run ends."""
+        return [self.zone_poi()] if self.w.gate is self and self.phase != 'finished' else []
 
     def score_cmd(self):
         return ('PayloadEscortScoreCommand', dict(totalScore=self.m.total(), runScore=int(self.score)))
@@ -395,9 +426,7 @@ class MmRun:
                                           victimHitpoints=int(a.hp), victimShield=0, victimNanoHull=0, damage=dmg,
                                           skilled=False, strike=False, cannonType=0))])
         if a.hp <= 0:
-            a.alive = False
-            w.npcs.pop(a.id, None)
-            w.send([('ShipDestroyedCommand', dict(destroyedUserId=a.id, explosionTypeId=0)), ('ShipRemoveCommand', {'userId': a.id})])
+            w.send([('ShipDestroyedCommand', dict(destroyedUserId=a.id, explosionTypeId=0))] + w.remove_npc(a))   # view, target, P.E.T.
             self.fail('msg_mutiny_escort_failed_destroyed')
         return True
 
@@ -500,9 +529,7 @@ class MmRun:
 
         def boom():
             if a and a.alive:
-                a.alive = False
-                w.npcs.pop(a.id, None)
-                w.send([('ShipDestroyedCommand', dict(destroyedUserId=a.id, explosionTypeId=0)), ('ShipRemoveCommand', {'userId': a.id})])
+                w.send([('ShipDestroyedCommand', dict(destroyedUserId=a.id, explosionTypeId=0))] + w.remove_npc(a))   # view, target, P.E.T.
             self.end_run(True)
         w.later(5.0, boom)
 

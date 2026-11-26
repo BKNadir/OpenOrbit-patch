@@ -6,7 +6,8 @@ On first run the profile is built from the "seed" in data/login.json (from the r
 Field names are the same as the protocol's, so the profile turns directly into a message.
 """
 import json, os, threading, time
-MODE_WINDOWS = ('voyagers', 'trinityTrials', 'expedition', 'eternal_blacklight', 'rogue_lite')     # feature bar (stage 8)
+MODE_WINDOWS = ('voyagers', 'trinityTrials', 'expedition', 'eternal_blacklight', 'rogue_lite',     # feature bar (stage 8)
+                'xeno_resonator')                                                           # always visible (client 1.1.119)
 # event window -> the calendar's events (visible while one runs; live test H47). Plutus: PlutusInfoCommand; labyrinth:
 # FrozenLabyrinthInfoCommand; Agatus and NPC events: the indicator of event_maps.py (the 'info' command in events.json)
 EVENT_WINDOWS = {'plutus': ('plutus',), 'frozen_labyrinth': ('labyrinth',), 'agatus_event': ('agatus',), 'npc_event': None,
@@ -26,7 +27,8 @@ EVENT_WINDOWS = {'plutus': ('plutus',), 'frozen_labyrinth': ('labyrinth',), 'aga
                  'battle_pass': ()}      # Objectives: while the save's pass runs (battle_pass.py; the session binds the hook), otherwise it opened empty
 # the 1.1.115 windows are not in the interface in the recording: added to the profile as a copy of the Return of Hero item (title, size from game.xml);
 # before opening a window the client looks up the menu item by name (FeatureMenuHelper.GetFeatureItemById)
-NEW_WINDOWS = {'apotheosis': ('title_kristallon_apotheosis', 728, 460), 'recallBattlePass': ('return_pass_name', 800, 440)}
+NEW_WINDOWS = {'apotheosis': ('title_kristallon_apotheosis', 728, 460), 'recallBattlePass': ('return_pass_name', 800, 440),
+               'xeno_resonator': ('title_resonator_restabilize', 529, 505)}       # client 1.1.119 (game.xml window xeno_resonator)
 # those whose visibility comes from the player's state, not the calendar: itemId -> () -> bool (stage 7: the Returnee Login campaign, stores.py)
 WINDOW_HOOKS = {}
 # the client opens the Urgent Missions window (diminish_quests) itself when a quest arrives (DiminishingQuestHandler.OpenWindow); if the item is not
@@ -72,7 +74,8 @@ def stack_cap(loot):
     """The client's item stack limit (client_items.json stack; close to 2^63 counts as 'unlimited') or None."""
     global _STACK
     if _STACK is None:
-        K = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'client_items.json'), encoding='utf8'))
+        import game_data as DATA
+        K = DATA.shared('client_items.json')
         _STACK = {k: int(v['stack']) for k, v in K['items'].items() if isinstance(v, dict) and 0 < (v.get('stack') or 0) < 10 ** 12}
     return _STACK.get(loot)
 import skill_tree as SKILL
@@ -275,7 +278,8 @@ class Profile:
         if d is not None:
             self.d = d
         elif not created:
-            self.d = SM.migrate_obj(json.load(open(path, encoding='utf8')))   # old-format profile (imported, --profile=...)
+            with open(path, encoding='utf8') as fh:
+                self.d = SM.migrate_obj(json.load(fh))   # old-format profile (imported, --profile=...)
         else:
             self.d = self._from_seed(self.seed)
             self.dirty = True
@@ -1116,8 +1120,9 @@ class Profile:
             self.cpu_init_sent = dict(fields, advancedJumpCPUEquipped=CIT.has_ajp(self))
             return dict(self.cpu_init_sent)
         if name == 'LegacyModule' and fields.get('message', '').startswith('0|n|INV|'):
-            parts = fields['message'].split('|')                # hidden on login if cloaked with the cloaking CPU
-            return dict(fields, message='0|n|INV|%s|%d' % (parts[3], 1 if self.d.get('cpu_hidden') else 0))
+            parts = fields['message'].split('|')                # hidden on login if cloaked: the cloaking CPU, or Ultimate Cloaking still running
+            hidden = self.d.get('cpu_hidden') or SA.effect(self, 'cloak')         # (a re-login within its 30 s drew the ship visible)
+            return dict(fields, message='0|n|INV|%s|%d' % (parts[3], 1 if hidden else 0))
         if name == 'InvitationBlockModule':                     # group invite block (the profile's choice instead of false in the recording)
             return dict(fields, active=bool(self.d.get('invite_block')))
         if name == 'LegacyModule' and fields.get('message', '').startswith('0|S|CFG|'):
@@ -1150,7 +1155,8 @@ class Profile:
                     lines = (x.get('toolTipItemBar') or {}).get('commandList')
                     if x['menuItemId'].startswith('buy_') and lines is not None and                             not any(l.get('baseKey') == QUICK_BUY_TIP['baseKey'] for l in lines):
                         lines.append(json.loads(json.dumps(QUICK_BUY_TIP)))
-                    self.menu_status_cache.setdefault(x['menuItemId'], json.loads(json.dumps(x)))
+                    if x['menuItemId'] not in self.menu_status_cache:      # (setdefault built the copy on every map load)
+                        self.menu_status_cache[x['menuItemId']] = json.loads(json.dumps(x))
                     cur = self.menu_status(x['menuItemId'])
                     if cur:
                         x.update(cur)

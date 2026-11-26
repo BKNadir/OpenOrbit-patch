@@ -1958,27 +1958,27 @@
     [
      "drone_designs_drone-diminisher-carbonite",
      1,
-     1.2
+     1.0
     ],
     [
      "drone_designs_drone-g-champion-dusklight",
      1,
-     1.2
+     1.0
     ],
     [
      "drone_designs_phantom-argon",
      1,
-     1.2
+     1.0
     ],
     [
      "drone_designs_drone-enigma-carbonite",
      1,
-     1.2
+     1.0
     ],
     [
      "drone_designs_drone-diminisher-lava",
      1,
-     1.2
+     1.0
     ],
     [
      "drone_designs_drone-diminisher-legend",
@@ -1994,6 +1994,11 @@
      "drone_designs_enigma-legend",
      1,
      0.66
+    ],
+    [
+     "drone_designs_drone-orcus-carbonite",
+     1,
+     1.0
     ]
    ]
   },
@@ -2018,7 +2023,7 @@
     [
      "ammunition_laser_mcb-25",
      30000,
-     15.0
+     14.291
     ],
     [
      "ammunition_laser_mcb-50",
@@ -2258,8 +2263,19 @@
       ]
      ],
      0.025
+    ],
+    [
+     "ship_hecate-plus_design_hecate-plus-prometheus",
+     1,
+     0.3545
+    ],
+    [
+     "ship_hyperion_design_hyperion-prometheus",
+     1,
+     0.3545
     ]
-   ]
+   ],
+   "_prometheus_2026": "client 1.1.119: Prometheus Hecate Plus / Prometheus Hyperion designs (Prometheus Treaty commemorative; no FAQ yet): in the box like the earlier Prometheus designs (adaptation); tools/version_119.py"
   },
   "PERSEUS_BLESSING_BOOTY_BOX": {
    "name": "Perseus Blessing",
@@ -2773,7 +2789,7 @@
      [
       "resource_logfile",
       5,
-      18
+      16.5
      ],
      [
       "resource_booty-key",
@@ -2844,6 +2860,21 @@
       "equipment_generator_shield_fs-04",
       1,
       0.25
+     ],
+     [
+      "ship_citadel-plus_design_citadel-plus-guardian",
+      1,
+      0.5
+     ],
+     [
+      "ship_hammerclaw-plus_design_hammerclaw-plus-dusklight",
+      1,
+      0.5
+     ],
+     [
+      "ship_solaris-plus_design_solaris-plus-dusklight",
+      1,
+      0.5
      ]
     ],
     "protegit": [
@@ -3960,7 +3991,8 @@
      ]
     ]
    },
-   "_forum_tr": "Official Turkish forum: Plutus box (A-BL 15%, Nobilis Plus designs 0.2%, Orcus/Pusat P.E.T. 0.25%/0.3%; NOS01/SEN01/TAR01 are not in the forum: since it is the only source of these modules they stay at 0.4% as an adaptation), Astral (Mucosum 5%, Astral Pusat Plus 1%), Winter/Labyrinth (Citadel Plus Frost 0.5%; XW01 is not in the forum): each table totals 100%"
+   "_forum_tr": "Official Turkish forum: Plutus box (A-BL 15%, Nobilis Plus designs 0.2%, Orcus/Pusat P.E.T. 0.25%/0.3%; NOS01/SEN01/TAR01 are not in the forum: since it is the only source of these modules they stay at 0.4% as an adaptation), Astral (Mucosum 5%, Astral Pusat Plus 1%), Winter/Labyrinth (Citadel Plus Frost 0.5%; XW01 is not in the forum): each table totals 100%",
+   "_mimesis_2026": "board-en 130498: the November 2026 Battle Pass Box adds Guardian Citadel Plus, Dusklight Hammerclaw Plus and Dusklight Solaris Plus at 0.5% each (A-BL 15%, Extra Energy 15% as before); tools/version_119.py"
   },
   "EMPYRIAN_BOOTY_BOX": {
    "name": "Empyrian Box",
@@ -4126,12 +4158,12 @@
      3.0
     ],
     [
-     "ship_hyperion_design_hyperion-empyrian",
+     "ship_mimesis_design_mimesis-empyrian",
      1,
      1.2999
     ],
     [
-     "ship_citadel-plus_design_citadel-plus-empyrian",
+     "ship_diminisher_design_diminisher-empyrian",
      1,
      1.2999
     ],
@@ -4144,19 +4176,19 @@
      "package",
      [
       [
-       "ship_g-champion_design_g-champion-argon",
+       "ship_goliath-plus_design_goliath-plus-argon",
        1
       ],
       [
-       "pet_designs_pet-diminisher-argon",
+       "pet_designs_pet-sentinel-argon",
        1
       ],
       [
-       "drone_designs_drone-sentinel-argon",
+       "drone_designs_drone-pusat-argon",
        1
       ],
       [
-       "drone_designs_drone-diminisher-argon",
+       "drone_designs_drone-berserker-argon",
        1
       ]
      ],
@@ -4166,11 +4198,11 @@
      "package",
      [
       [
-       "ship_sentinel_design_sentinel-lava",
+       "ship_venom_design_venom-inferno",
        1
       ],
       [
-       "pet_designs_pet-cyborg-lava",
+       "pet_designs_pet-hammerclaw-inferno",
        1
       ],
       [
@@ -4184,15 +4216,15 @@
      "package",
      [
       [
-       "ship_berserker_design_berserker-sandstorm",
+       "ship_hammerclaw_design_hammerclaw-carbonite",
        1
       ],
       [
-       "drone_designs_drone-cyborg-sandstorm",
+       "drone_designs_drone-goliath-x-carbonite",
        2
       ],
       [
-       "pet_designs_mirage-orange",
+       "pet_designs_pet-cyborg-carbonite",
        1
       ]
      ],
@@ -4202,26 +4234,26 @@
      "package",
      [
       [
-       "ship_cyborg_design_cyborg-carbonite",
+       "ship_spectrum_design_spectrum-lava",
        1
       ],
       [
-       "pet_designs_pet-diminisher-carbonite",
+       "pet_designs_pet-centurion-lava",
        1
       ],
       [
-       "drone_designs_drone-enigma-carbonite",
+       "drone_designs_drone-cyborg-lava",
        1
       ],
       [
-       "drone_designs_drone-cyborg-carbonite",
+       "drone_designs_drone-berserker-lava",
        1
       ]
      ],
      0.025
     ]
    ],
-   "_source": "wiki: stage and item probabilities, Epic design packages"
+   "_source": "board-en FAQ 130486 (Empyrian March November 2026), the whole table: main package Epic 0.1%, Legend 3.9%, Rare 12%, Common 24%, Additional Content 60%; Epic 25% per package: Argon Goliath Plus ship + Argon Sentinel P.E.T. + Argon Pusat drone + Argon Berserker drone; Inferno Venom ship + Inferno Hammerclaw P.E.T. + 2x Inferno drone; Carbonite Hammerclaw ship + 2x Carbonite Goliath-X drone + Carbonite Cyborg P.E.T.; Lava Spectrum ship + Lava Centurion P.E.T. + Lava Cyborg drone + Lava Berserker drone; Legend 33.33% each: Empyrian Mimesis, Empyrian Diminisher, Empyrian Goliath Plus; Rare 25% each: Inferno Orcus, Lava Mimesis, Argon Venom, Blaze Berserker; Common: Ocean Mimesis, Borealis Goliath-X, Borealis Mirage P.E.T., Ocean Pusat P.E.T., Ocean Goliath-X drone, Poison Spectrum drone 11.7% each, Inferno Cerberus drone 10.4%, Cerberus drone 19.4%; Additional: EMP-01 x20 8%, Extra Energy x30 10%, HSTRM-01 x2,000 15%, UBR-100 x800 4%, ABR x20 2%, Indoctrine Oil x5 1%, Kyhalon x10 2%, LF-4 x1 1%, Log Disk x10 8%, WIZ-X x700 18%, Salvage Core x10 5%, RSB-75 x800 5%, Tetrathrin x15 2%, Bifenon x20 2%, Permit Plus x1 2%, UCB-100 x3,000 10%, Permit x1 5%; boosters do not apply. Item weight = package % x item %"
   },
   "PROSPEROUS_BOOTY_BOX": {
    "name": "Prosperous Box",

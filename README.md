@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://discord.com/invite/openorbit"><img src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
-  <img src="https://img.shields.io/badge/client-1.1.117-40DFFF" alt="Client 1.1.117">
+  <img src="https://img.shields.io/badge/client-1.1.119-40DFFF" alt="Client 1.1.119">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-0B1323" alt="Windows, Linux, macOS">
   <img src="https://img.shields.io/badge/panel-8%20languages-FFB94D" alt="8 languages">
@@ -66,7 +66,7 @@ everything about the game can be tuned from a desktop panel.
 | --- | --- |
 | **Windows 10 or 11** | Linux and macOS work too, through Proton or Wine: see [Linux and macOS](#linux-and-macos) |
 | **[Python](https://www.python.org/downloads/) 3.10 or newer** | Nothing else to install |
-| **The DarkOrbit Unity client 1.1.117** | Not included. The wizard downloads it from the official download server (about 3.5 GB; 4.4 GB of free space). If you have it already, the folder must contain `DarkOrbit.exe` and `DarkOrbit_Data` |
+| **The DarkOrbit Unity client 1.1.119** | Not included. The wizard downloads it from the official download server (about 3.8 GB; 4.4 GB of free space). If you have it already, the folder must contain `DarkOrbit.exe` and `DarkOrbit_Data` |
 | **Edge or Chrome** | For the panel window; otherwise your default browser opens it |
 
 You can run the wizard again at any time from the **Panel** page, where you can also switch the language and create a
@@ -120,7 +120,8 @@ desktop shortcut.
   modules, particle cannons and refractors, Singularity Drive, Omega AutoTactic, pilot skills, achievements and titles,
   ranks, daily login.
 - **Events:** yearly and weekly events follow the real calendar; switch each one on or off in the panel.
-- **Social, single-player:** chat, mail, clans and the auction, with optional virtual rivals. Bot players are planned.
+- **Social, single-player:** chat, mail, clans and the auction, with optional virtual rivals.
+- **Bot players (beta):** bots that level up, chat, team up, found clans and fight in PvP modes, set up on the **Bots** page.
 
 ### In the panel
 
@@ -132,6 +133,7 @@ desktop shortcut.
 | **Character editor** | Edit everything in a save with the game's own images: pilot, company, level, honor and wallet; ships, designs and both configs; drones, P.E.T., inventory, ammunition, ores, resources and boosters. Equip by clicking a slot, hover any item for its description and values, and edit upgrade levels, unstable-module and particle-weapon attributes, Quantum Fluid Cores and CPU charges. Changes follow the game's own hangar rules and stay in a draft until you save; the previous state is backed up |
 | **Game Settings** | Multipliers and rules (damage, rewards, drop chances, alien and box counts, prices, cooldowns …), presets such as Relaxed, Fast progress and Hard, your own templates, and settings per save |
 | **World Editor** | Build your own worlds on top of the standard game: aliens (stats, rewards, new variants), maps, quests (targets, rewards, prerequisites, new quests in a few clicks), shop prices, boxes and loot, Galaxy Gate waves, events and economy. Each save picks its world, and worlds can be shared as a file or a code |
+| **Bots** (beta) | Create a bot pack (Simple, Normal or Advanced mode with a local or online language model), tune its size, companies and permissions, and assign it to a world |
 | **Events** and **Event Calendar** | Each event by calendar or on / off by hand, and every session laid out over time |
 | **In-game pages** | While you play: Shop, Hangar, Skylab and Auction right in the panel, applied to the running game at once |
 | **Client**, **Server**, **Panel** | Game folder, download and version check, display; processes, ports and live logs; language, updates, shortcut and folders |
@@ -251,12 +253,11 @@ off or check by hand.
 
 - Don't run `DarkorbitLauncher.exe` from the client folder: it may update the client from the official servers and break
   compatibility. Start the game from the panel. When a new client version comes out, the panel offers a one-click update.
-- The server is written for client 1.1.117; 1.1.116 has the same protocol and still works (the panel suggests the
-  update). For another version the panel can adapt the protocol from the new client's code (*Client* page; needs
+- The server is written for client 1.1.119. Older clients (1.1.117 and earlier) use a different protocol: the panel
+  asks for the one-click update. For another version the panel can adapt the protocol from the new client's code (*Client* page; needs
   `pip install capstone`).
 - A save that is being played opens read-only in the character editor; every save from the editor keeps a backup of the
   previous state.
-- Bot players are not in yet, so missions that need other players don't progress.
 
 </details>
 
@@ -271,7 +272,7 @@ off or check by hand.
 | `server/save/worlds/` | Your worlds from the World Editor |
 | `server/save/panel.json` | Panel settings (language, game folder, display, backups) |
 | `server/logs/` | Server, client and panel logs |
-| `DarkOrbit_Version1.1.117/` | The game client, if the panel downloaded it |
+| `DarkOrbit_Version1.1.119/` | The game client, if the panel downloaded it |
 | `server/cdn/do_img/` | Game images fetched from the official CDN the first time the game shows them |
 | `server/save/proton/`, `server/save/wine/`, `server/save/wine_engine/` | Linux and macOS: the game's prefix and the panel's Wine |
 

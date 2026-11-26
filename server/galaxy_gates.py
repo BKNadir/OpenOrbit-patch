@@ -61,6 +61,7 @@ CAT_AMMO, CAT_RES, CAT_VOUCHER, CAT_PART, CAT_SPECIAL, CAT_LOG = 1, 2, 3, 4, 5, 
 XENOMIT, XENOMIT_ITEM = 3, 4              # the server's ore type; the client's builder id (record: ORE 4)
 PORTAL_BASE = 150900000                   # gate portal ids: + gate id (X-1), + 50 + id (exit from the gate),
 NEXT_PORTAL = 100                         # + 100 + id (the next map in a multi-map gate)
+NEUTRAL_SEC = 300                         # a cleared map of a multi-map gate: home after 5 min (client text msg_gg_move_next_gate)
 HOME_MAP = {1: 1, 2: 5, 3: 9}
 # shield absorption of gate aliens (if the type has none of its own): player report 2026-10-27, in the real game gate aliens have 50% (map
 # aliens 70%, npc.json savas.npc_kalkan_emme); with the Moth formation they die before their shield runs out. No number in the source
@@ -103,7 +104,7 @@ def screen(text, big=False, **wild):
                                        baseKeyType=mod('ReplacementTypeModule', typeValue=kind), textStyle=0))))
 
 
-from legacy_protocol import legacy, loot_kind, loot_line, stm  # noqa: E402,F401  (old text protocol: legacy_protocol.py)
+from legacy_protocol import legacy, loot_line, stm  # noqa: E402,F401  (old text protocol: legacy_protocol.py)
 
 
 def npc_type(key, wave, i):
@@ -548,7 +549,7 @@ class Gates:
         """One spin -> result records. A duplicate part becomes the multiplier (at most 5 = x6; on reaching 5 it is used automatically
         on the next reward). If a part comes up with the multiplier, as many different missing parts as the multiplier; if none are missing, the excess is ammo (client FAQ
         galaxygates_multiplier_multilpier_on_parts_p: "you'll win new parts for the gate")."""
-        G, g, mk = self.gate(key), GATES[key], key       # mk: the multiplier's gate (ABG: shared)
+        g, mk = GATES[key], key       # mk: the multiplier's gate (ABG: shared)
         wts = weights()
         gm = self.p.d['ship']
         if int(gm.get('nanoHull', 0)) + grants.get('nano', 0) >= gm.get('maxNanoHull', 0):
@@ -563,7 +564,7 @@ class Gates:
             # Alpha, Beta and Gamma are shared in the builder: the part goes to one of the three regardless of the selected gate, to that gate's progress (official ABG
             # builder; user report 2026-10-24: each gate took parts from its own spin). A part falling on a built gate is a duplicate (multiplier)
             key = random.choice(ABG)
-            G, g = self.gate(key), GATES[key]
+            g = GATES[key]
         held = self.mult(mk)
         if cat == CAT_PART and held and (use_mult or held >= K['max_multiplier']):
             mult = held + 1
@@ -691,8 +692,11 @@ class Gates:
         gid = f.get('gateId')
         key = BY_ID.get(gid)
         if not key or not self.built(key):
+            # the client ignores the SetupGateCommand's errorCode (HandlePrepareJumpComplete: parts 0, "jump created"): the real state instead
             self.log('   gate could not be prepared: %s' % gid)
-            return [('GalaxyGateBuilderSetupGateCommand', dict(livesLeft=-1, lifePrice=-1, id=gid or 0, errorCode=1))]
+            cmd = self.info_cmd()
+            self.sent = self.seen(cmd[1])
+            return [cmd]
         G = self.gate(key)
         with self.p.lock:
             if not G['ready']:
@@ -803,7 +807,7 @@ class Gates:
         # Double Rewards Day in Dispatch too (by collection time; client dispatch_gate_description, forum 160341). Items: forum and in-game
         # windows: UCB-100, ABR and Schism x1; Kronos's RSB-75/UBR-100/energy x2; for a lucky reward the probability is the same, the count x2
         x2 = 2 if CAL.is_active('gg_double_reward') else 1
-        first = self.gate(key).get('done', 0) == 0         # first completion: Epsilon LF-4, Zeta Havoc, Kronos Spartan guaranteed (forum)
+        first = self.gate(key).get('done', 0) == 0         # first completion: Epsilon LF-4 and Zeta Havoc guaranteed (forum)
         rm =reward_msgs or (lambda tot, **kw: self.m.money_msgs() if self.m else [])
         self.p.ach('gate', type='%s_GATE' % key.upper(), dispatch=dispatch)      # the client's GalaxyGateType (STREUNER_GATE ...)
         if CAL.is_active('battle_for_influence') and not dispatch:          # Battle for Influence: the points of a gate victory (official forum 131012)
@@ -812,9 +816,17 @@ class Gates:
         if not dispatch and self.m:                                         # event points (Hatching Out: Alpha/Beta/Gamma 160 VPP)
             import event_points as OP
             ev_msgs = OP.gate(self.p, key, lambda l, n: self.m.prize(l, n, 'gate'))
-        cbs = self.p.cbs_mods() if not dispatch and getattr(self.p, 'cbs_mods', None) else {}
-        ep = int(R['ep'] * x2 * multiplier * (1 + (0 if dispatch else self.p.mods().get('gate_ep', 0)) + cbs.get('ep', 0)))
-        honor = int(R['honor'] * x2 * multiplier * (1 + cbs.get('honor', 0)))
+        ep_factor = honor_factor = x2 * multiplier
+        if not dispatch:
+            import booster
+            import skill_tree
+            boosts = booster.mods(self.p)
+            cbs = self.p.cbs_mods() if getattr(self.p, 'cbs_mods', None) else {}
+            ep_factor *= 1 + boosts.get('ep', 0) + cbs.get('ep', 0) + self.p.mods().get('gate_ep', 0)
+            gear_honor = sum(mods.get('honor', 0) for mods in (self.p.formation(), self.p.design_mods(), self.p.ship_mods()))
+            honor_factor *= (1 + gear_honor) * (1 + boosts.get('honor', 0) + cbs.get('honor', 0)) * (1 + skill_tree.mods(self.p).get('honor', 0))
+        ep = int(round(R['ep'] * ep_factor, 8))
+        honor = int(round(R['honor'] * honor_factor, 8))
         ep, honor, uri = SET.amount('ep', ep, 'gate'), SET.amount('honor', honor, 'gate'), SET.amount('uridium', int(R['uridium'] * multiplier), 'gate')   # panel
         tot = self.p.gain(ep=ep, honor=honor, uridium=uri, reason='galaxy_gate_done')
         msgs = rm(tot, ep=ep, honor=honor, uridium=uri) + ev_msgs
@@ -958,6 +970,7 @@ class Run:
             self.phase, self.t = 'void', now
             world.add_gate(gates.next_portal(key, self.map, wave_map(self.g, G['wave'])))
             world.add_gate(gates.exit_portal(key, self.map, side=True))
+            self.neutralised()
         else:
             self.phase, self.t = 'intro', now + pace('intro_wait_sec')
             world.send(self.say('ongoing' if G['wave'] else 'entry'))
@@ -1038,6 +1051,11 @@ class Run:
 
     def tick(self, now):
         w, G = self.w, self.k.gate(self.key)
+        if self.phase == 'dead' and getattr(self, 'before_death', None) == 'fight' and self.fight_over():
+            self.before_death = 'cleared'       # its last alien died after the player (a mine, a rocket on its way): the wave counts, it is
+            with self.k.p.lock:                 # not played again on re-entering (the intro below closes it; Hades' revive goes on as usual)
+                G['cleared'] = G['wave']
+                self.k.p.dirty = True
         if w.hero_dead or w.jumping or self.phase in ('void', 'done', 'dead', 'move'):
             return
         if self.phase == 'fight':
@@ -1075,6 +1093,12 @@ class Run:
                 self.countdown(now)
             return
         if self.phase in ('intro', 'break'):
+            with self.k.p.lock:
+                done = G.pop('cleared', None) == G['wave']
+            if done:                                # cleared while the player was dead (above): its portals / the next wave / the reward
+                self.phase = 'fight'
+                self.wave_done(now)
+                return
             self.sub, self.counted, self.exposed, self.cleared, self.groups = 0, None, False, 0, []
             self.guarding, self.next_group, self.protected, self.queue, self.due = False, 0, {}, [], 0
             self.npcs.clear()
@@ -1096,6 +1120,12 @@ class Run:
                 w.cinematic(*boss.mover.pos(time.time()))
         self.left = None
         self.phase = 'fight'
+
+    def fight_over(self):
+        """The wave's aliens are all spawned and dead (a shielded-boss wave: its boss is dead, boss_tick)."""
+        if self.boss_wave():
+            return self.boss_npc() is None
+        return not self.queue and not any(i in self.w.npcs for i in self.npcs)
 
     def counts(self, wave, grp):
         """The group's [alien, count]s: with the panel's wave_aliens multiplier (the persistent boss is one); in Kronos Evil Iris equals the player's Iris drone
@@ -1264,8 +1294,16 @@ class Run:
         self.w.add_gate(self.k.next_portal(self.key, self.map, nxt))
         self.w.add_gate(self.k.exit_portal(self.key, self.map, side=True))
         self.w.send([self.wave_msg()] + self.say('next_map' if nxt != self.map else 'next_wave', wave=G['wave']))
+        if nxt != self.map:
+            self.neutralised()
         self.phase = 'move'                 # after the messages (so it also sees the messages waiting for the stage)
         self.w.log('   %s gate: wave %s over; portals open (next %s)' % (self.g['name'], label, nxt))
+
+    def neutralised(self):
+        """A map of a multi-map gate is cleared: the client's msg_gg_move_next_gate ("You will be sent home in 5 minutes if you do not
+        proceed to the next part of the galaxy gate."); after NEUTRAL_SEC the exit portal takes the player home (the gate's progress stays)."""
+        self.w.send([legacy('0|A|STM|msg_gg_move_next_gate')])
+        self.w.auto_jump(self.k.exit_portal(self.key, self.map, side=True), NEUTRAL_SEC)
 
     def complete(self):
         """Last wave: rewards (Kapilar.finish), exit portal, on-screen messages."""
@@ -1310,5 +1348,5 @@ class Run:
     def revive(self):
         """Hades: respawned on the gate map; the wave continues where it left off."""
         if self.phase == 'dead':
-            self.phase = getattr(self, 'before_death', 'fight')
+            self.phase = getattr(self, 'before_death', 'fight').replace('cleared', 'fight')
             self.w.log('   %s gate respawned: %s' % (self.g['name'], self.phase))

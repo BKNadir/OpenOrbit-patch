@@ -26,6 +26,7 @@ filters: {}}.
 """
 import json, math, os, time
 
+import game_data as DATA
 import inventory as INV
 import settings as SET
 import technology as TECH
@@ -35,7 +36,7 @@ from legacy_protocol import legacy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 T = json.load(open(os.path.join(HERE, 'data', 'recipes.json'), encoding='utf8'))['recipes']
-DRONES = json.load(open(os.path.join(HERE, 'data', 'items.json'), encoding='utf8'))['drones']
+DRONES = DATA.shared('items.json')['drones']
 # titles for distinct items assembled (the client's achievement_assembly_item-crafting_1/2 texts: two / four different items; no achievement
 # XML in the client, so the title is granted directly, like the ranking titles)
 CRAFT_TITLES = ((2, 'title_achievement_assembly_item-crafting-1'), (4, 'title_achievement_assembly_item-crafting-2'))
@@ -285,16 +286,20 @@ class Assembly:
             # before upgrading."); the client code that shows this warning (AssemblyViewSystem.PromptShipChange) is never called
             return ([legacy('0|A|STM|assembly_warning_ship_in_use')] if in_use else []) + [self.update(key)]
         removed = INV.spend(self.p, need, reason='buy_SPECIAL', detail=key)
+        if removed is None:                      # spent elsewhere between the check and the spending: no result without the ingredients
+            self.log('   Assembly: materials gone before %s could start' % key)
+            return [self.update(key)]
         now = time.time()
         with self.p.lock:
-            self.st['production'][key] = dict(count=amount, end_time=now + SET.duration(r['duration_sec'] * amount, 'assembly'), previous=self.st['counter'].get(key, 0))
+            # the whole batch takes one recipe's time (player report 2026-11-25: with a batch the time was multiplied by the amount)
+            self.st['production'][key] = dict(count=amount, end_time=now + SET.duration(r['duration_sec'], 'assembly'), previous=self.st['counter'].get(key, 0))
             if key not in self.st['seen']:
                 self.st['seen'].append(key)
             if r['usage'] != NO_LIMIT or r['scale'] != 1:
                 self.st['daily'][key] = [period_of(key), self.used_today(key) + amount]
             self.p.dirty = True
         self.p.ach('assembly_build', recipe=key, count=amount)
-        self.log('   Assembly: %s x%d started (%d s; %s)' % (key, amount, r['duration_sec'] * amount, need))
+        self.log('   Assembly: %s x%d started (%d s; %s)' % (key, amount, r['duration_sec'], need))
         return INV.update_msgs(self.m, self.p, list(need), removed) + [self.update(key, f.get('targetItemId', 0))]
 
     def collect(self, f, now=None):

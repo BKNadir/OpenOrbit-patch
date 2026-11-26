@@ -12,7 +12,7 @@ screen "Free repairs in Vortex of Greed" (10 s later at a random point on the ma
 Client: StrikeAndExitInfoRequest -> StrikeAndExitInfoCommand (window 132), on the map StrikeAndExitMapInfoCommand (HUD 131),
 StrikeAndExitScoreCommand / RemoveScoreCommand, ExchangeShopRequest {eventName StrikeAndExit | StrikeAndExitVIP, action 0 list, 1 buy}
 -> ExchangeShopCommand. Vanguard (resource_vog-vanguard) is bought in the shop with uridium; it expires when the event ends.
-In the profile: vortex {week, earnings, claimed {shop: {eid: [period, count]}}}.
+In the profile: vortex {week, earnings, claimed {shop: {eid: [period, count]}}, boss_session (start of the session whose Battleray died)}.
 """
 import datetime, json, math, os, random, time
 
@@ -45,7 +45,7 @@ def _register():
     for k, v in D.get('alien_spawns', {}).items():
         world_module.CFG['types'][k] = {x: y for x, y in v.items() if x not in ('count', 'sc', 'box')}
     if D.get('boss'):
-        world_module.CFG['types'][D['boss']['type']] = {x: y for x, y in D['boss'].items() if x not in ('type', 'time_sec')}
+        world_module.CFG['types'][D['boss']['type']] = {x: y for x, y in D['boss'].items() if x not in ('type', 'time_sec', 'drops')}
     # the evacuation zone's anchor: the client looks for the VisualModifier's target among ships (UnitHelper.GetShip; no effect appeared
     # on an entity, live tour Ö4): an invisible, friendly, motionless ship
     world_module.CFG['types'][ZONE_TYPE] = dict(name='', model='84', npc_id=0, hp=1, shield=0, damage=0, speed=0, aggressive=False, friendly=True,
@@ -252,7 +252,9 @@ class Vortex:
         return []
 
     def tick(self, now):
-        if not active(now):
+        # adaptation: a session that began while the event was on finishes under the rules it began with (the Vanguard and its
+        # evacuation multiplier stay until the run is over); only new entries are refused (attach, portals)
+        if not active(now) and not (self.run and not self.run.left and self.world is not None and self.world.gate is self.run):
             vip = D.get('vip_item', 'resource_vog-vanguard')
             if self.p.resource(vip) > 0:                  # Vanguard is for the event period
                 self.p.add_resource(vip, -self.p.resource(vip))
@@ -320,7 +322,7 @@ class VogRun:
         self.npcs = set()
         self.wave_boxes = set()
         self.boss_id = None
-        self.boss_done = False
+        self.boss_done = mode.st.get('boss_session') == start       # killed in this session already: re-entering brought a new Battleray
         self.holder = False
         self.zones = []                            # [x, y, entity]
         self.zone_times = set()
@@ -343,6 +345,13 @@ class VogRun:
 
     def enter_msgs(self):
         return [self.score_cmd(), self.map_info()]
+
+    def resend_msgs(self):
+        """world.resend (the free respawn, a ship change): the client built a new hero unit, whose SaeScore (the score above the ship,
+        StrikeAndExitScoreCommandHandler) is empty, and dropped its effects (the treasure holder's spotlight)."""
+        if self.left or self.w.gate is not self:
+            return []
+        return [self.score_cmd()] + ([self.spot(True)] if self.holder else [])
 
     def score_cmd(self):
         return ('StrikeAndExitScoreCommand', dict(score=int(self.score), uid=self.w.hid))
@@ -505,7 +514,6 @@ class VogRun:
             w.send([GALAXY.screen('Evacuating in %d…' % left)])
 
     def evacuate(self):
-        w = self.w
         coins = self.score
         if self.double:
             coins *= 2
@@ -533,8 +541,10 @@ class VogRun:
         w.send(msgs)
         self.m.was_in = False
         home = self.m.home()
-        if self.m.change_map:
-            w.later(2.0, lambda: self.m.change_map(home, None, 'station'))
+        if self.m.change_map:              # dead (the session ended meanwhile): the death screen's base repair takes them home (no 0 HP jump)
+            w.later(2.0, lambda: not w.hero_dead and self.m.change_map(home, None, 'station'))
+            if w.hero_dead:
+                w.send([('KillScreenUpdateCommand', {'options': w.repair_options()})])      # the on-the-spot repair is gone (repair_offers)
 
     def spot(self, on):
         return ('VisualModifierCommand', dict(userId=self.w.hid, modifier=SPOT_LIGHT, attribute=0, additionalAttribute='',
@@ -550,11 +560,19 @@ class VogRun:
             self.dirty = True
         elif npc.id == self.boss_id:
             self.boss_id, self.boss_done = None, True
+            with self.m.p.lock:
+                self.m.st['boss_session'] = self.start              # one Battleray per session (VogRun.__init__)
+                self.m.p.dirty = True
             self.holder = True
             msgs += [self.spot(True), legacy('0|A|STM|strikeandexit_message_user_bounty|%%USERNAME%%|%s'
                                              % self.m.p.d['pilot'].get('userName', ''))]
             self.dirty = True
             w.log('   Vortex: the player is the treasure holder')
+            # Xeno Resonator drops of the Battleray (FAQ 130529: UC 5.7%, R 10%, EP 19%, MA 15% per type, chips, attribute items)
+            for loot, pct in D['boss'].get('drops', []):
+                if random.random() < SET.chance('drop', pct / 100.0, 'mod'):
+                    msgs += self.m.m.prize(loot, 1)
+                    w.log('   Vortex: the Battleray dropped %s' % loot)
         return msgs
 
     # death and the death screen (world.repair_offers / repair_options / kill_screen_repair hooks)
@@ -583,7 +601,7 @@ class VogRun:
         pass
 
     def repair_offers(self):
-        return {world_module.REPAIR_BASE: 0, REPAIR_SAE: 0}
+        return {world_module.REPAIR_BASE: 0, REPAIR_SAE: 0} if not self.left else {world_module.REPAIR_BASE: 0}
 
     def repair_texts(self, kind):
         left = max(0, int(D['spawn_cooldown_sec'] - (time.time() - (self.w.death_time or 0))))

@@ -17,16 +17,16 @@ Client (window pvp_summer, UIPvpSummerSystem):
   perKillRanges stays empty: no reward per reputation-per-kill band is published.
 In the profile: galactic_strife {period, rep, paid (highest milestone paid), day, unique [names], victims {name: n}, losses [t]}.
 """
-import json, math, os, time
+import math, os, time
 
+import game_data as DATA
 import event_calendar as CAL
 import map_links as H
 import rankings as RK
-from legacy_protocol import legacy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _PATH = os.path.join(HERE, 'data', 'extra_events.json')
-D = (json.load(open(_PATH, encoding='utf8')) if os.path.exists(_PATH) else {}).get('galactic_strife', {})
+D = (DATA.shared('extra_events.json') if os.path.exists(_PATH) else {}).get('galactic_strife', {})
 EVENT = D.get('event', 'galactic_strife')
 MAPS = tuple(D.get('maps', ()))
 RANK_REP, RANK_PER_KILL = 3, 4                # RankRewardRequest.RankType PVP_SUMMER_EVENT_REPUTATION / _PER_KILL
@@ -105,12 +105,11 @@ def fever_times(now=None):
     f = D.get('fever', {})
     iv = []
     t0 = time.localtime(now)
-    midnight = time.mktime((t0.tm_year, t0.tm_mon, t0.tm_mday, 0, 0, 0, 0, 0, -1))
+    at = lambda d, h: time.mktime((t0.tm_year, t0.tm_mon, t0.tm_mday + d, h, 0, 0, 0, 0, -1))      # local clock time (DST days are 23/25 h)
     for d in range(0, 8):
-        base = midnight + d * 86400
-        wd = time.localtime(base + 3600).tm_wday
+        wd = time.localtime(at(d, 12)).tm_wday
         for a, b in f.get('weekend' if wd >= 5 else 'weekday', []):
-            iv.append((base + a * 3600, base + b * 3600))
+            iv.append((at(d, a), at(d, b)))
     cur = next((e for s, e in iv if s <= now < e), None)
     nxt = next((s for s, e in iv if s > now), None)
     return (int(cur - now) if cur else 0), (int(nxt - now) if nxt else 0)
@@ -204,11 +203,11 @@ class GalacticStrife:
         self.crate_due = []         # [(time, kind)] crates to place again
         self.protect_end = 0.0      # PvP protection running (spawn 5 s, loss streak 60 min): its end
         self.protect_from = 0.0
+        self.died = False           # destroyed since the map was built: the next reload is a respawn on this map (spawn protection)
 
     # ------------------------------------------------------------ client
     def info_cmd(self, now=None):
         now = time.time() if now is None else now
-        st = state(self.p, now)
         to_end, to_next = fever_times(now)
         return ('PVPSummerEventInfoCommand', dict(
             perKillRanges=[], timeToEndFever=to_end, timeToNextFever=to_next, reputationUpdateCommand=self.self_cmd(now)[1],
@@ -249,15 +248,38 @@ class GalacticStrife:
         world.free_repair = lambda: active() and fever() and on_map(world.map_id)
         self.labels, self.crates, self.crate_due = {}, {}, []
         self.next_shuffle = self.shuffle_at(time.time())
+        self.died = False
         if not self.here():
             self.protect_end = 0.0
             return []
-        now = time.time()
-        st = state(self.p, now)
         world.later(1.0, self.place_crates)
-        until = max(now + D.get('spawn_protection_sec', 5), st.get('protect_until', 0))     # entering / respawning on the maps
-        world.later(1.5, lambda: self.protect(until))
+        self.spawned(world)
         return []
+
+    def spawned(self, w):
+        """Entering the maps or respawning on one: 5 s PvP protection (or the loss streak's longer one), once the ship is built."""
+        now = time.time()
+        until = max(now + D.get('spawn_protection_sec', 5), state(self.p, now).get('protect_until', 0))
+        w.later(1.5, lambda: self.world is w and self.protect(until))
+
+    def resend_msgs(self, w):
+        """world.resend: the client cleared the map (a respawn here, a ship change): the reputation labels under the ships and the
+        protection / Flux looks belong to the old ship units; a respawn is a spawn (wiki: 5 s protection)."""
+        if w is not self.world or not self.here():
+            return []
+        now = time.time()
+        self.labels, self.next_label = {}, 0.0          # every label again at the next tick
+        msgs = []
+        if self.died:
+            self.died = False
+            self.spawned(w)
+        elif self.protect_end > now:
+            msgs.append(self.protect_look(True))
+        flux = [e for e in w.hero_effects.get('skill', now) if e['source'] == 'gs_flux']
+        if flux:
+            msgs.append(('VisualModifierCommand', dict(userId=w.hid, modifier=VM_FLUX, attribute=int(math.ceil(flux[0]['end_time'] - now)),
+                                                       additionalAttribute='', count=0, activated=True)))
+        return msgs
 
     # ------------------------------------------------------------ PvP protection
     def protect(self, until):
@@ -401,6 +423,7 @@ class GalacticStrife:
         """The hero was destroyed on a Galactic Strife map: the damage dealers gain, the hero loses."""
         taken, self.taken = self.taken, {}
         self.protect_end = 0.0
+        self.died = True
         if not self.here() or not (source_player is not None or getattr(killer, 'bot', None) is not None):
             return []
         winners = [(self.profile_of(k), s) for k, s in shares(taken)]
@@ -455,15 +478,20 @@ class GalacticStrife:
                 self.next_shuffle = self.shuffle_at(now)
                 self.shuffle(now)
                 return msgs
-            if any(t <= now for t, k in self.crate_due):
+            if any(t <= now for t, k in self.crate_due) or not self.crates and not self.crate_due:     # (none: the event began here)
                 self.crate_due = [(t, k) for t, k in self.crate_due if t > now]
                 self.place_crates()
+        elif self.crates:                         # the event ended while on the map: its crates go (they are not collected afterwards)
+            for h in list(self.crates):
+                if w.boxes.pop(h, None) is not None:
+                    msgs.append(('RemoveCollectableCommand', {'collected': False, 'hash': h}))
+            self.crates, self.crate_due = {}, []
         if now < self.next_label:
             return msgs
         self.next_label = now + LABEL_SEC
         if not self.here():
             if self.labels:                       # left the maps or the event ended: the labels go (a negative value hides them)
-                msgs = [('PVPSummerEventReputationUpdateCommand', dict(uid=uid, reputation=-1)) for uid in self.labels]
+                msgs += [('PVPSummerEventReputationUpdateCommand', dict(uid=uid, reputation=-1)) for uid in self.labels]
                 self.labels = {}
             return msgs
         if self.sent_rep != rep(self.p):

@@ -24,21 +24,22 @@ MP-1, SG3N-A01, Flax) a quarter (today's ABRs are ~1/4 of class2's); CBS modules
 402,750, outer modules 268,500). Multiplier: legacy_upgrade_price. The client shows the cost from its own recipe: the panel writes legacy_table()
 to the client's BepInEx/openorbit/legacy_upgrade.json, and the plugin's LegacyUpgrade patch turns the recipes into uridium.
 """
-import datetime, json, os, time
+import os, time
 
+import game_data as DATA
 import inventory as INV
 import settings as SET
 import event_calendar as CAL
 import ranks as RT
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-D = json.load(open(os.path.join(HERE, 'data', 'client_items.json'), encoding='utf8'))
+D = DATA.shared('client_items.json')
 UP, DIS, ITEMS = D['upgrades'], D['disassembly'], D['items']
 INGREDIENTS = {loot for groups in (UP, DIS) for recipe in groups.values() for level in recipe['levels']
                for costs in (level.get('cost', {}), level.get('jump_to', {})) for loot in costs}
 UP_OF = {loot: k for k, c in UP.items() for loot in c['items']}
 DIS_OF = {loot: k for k, c in DIS.items() for loot in c['items']}
-HOUR = json.load(open(os.path.join(HERE, 'data', 'items.json'), encoding='utf8'))['upgrade_hour']
+HOUR = DATA.shared('items.json')['upgrade_hour']
 LASER, SHIELD, ROCKET = 'LASER_DAMAGE_UPGRADE', 'GENERATOR_SHIELD_UPGRADE', 'ROCKETLAUNCHER_DAMAGE_UPGRADE'
 DRONE_DAMAGE, DRONE_SHIELD = 'DRONE_DAMAGE_UPGRADE', 'DRONE_SHIELD_UPGRADE'
 # the level badge of a hangar item (HangarShipEquipmentInventoryItem.UpgradeLevel, "key,displayed level"): the client
@@ -347,7 +348,8 @@ class Upgrade:
         if iid in self.p.equipped_ids():
             from legacy_protocol import legacy
             return [legacy('0|A|STM|msg_cannot_disassemble_equipped_item'), self.update(key, iid)]
-        lv = item_level(self.p, iid)
+        import resonator as RS
+        lv = RS.level_of(loot) if RS.is_item(loot) else item_level(self.p, iid)     # Xeno Resonator: its level 1-7 (client 1.1.119)
         row = next((r for r in DIS[key]['levels'] if r['level'] == lv), None)
         if not row:
             self.log('   Disassembly: %s level %d cannot be disassembled' % (loot, lv))
@@ -363,6 +365,8 @@ class Upgrade:
             self.p.d.get('upgrade_level', {}).pop(str(iid), None)
             self.p.d.get('item_level', {}).pop(str(iid), None)
             self.p.dirty = True
+        if RS.is_item(loot):
+            RS.recycled(self.p, iid)
         msgs = INV.update_msgs(self.m, self.p, list(fee), [iid])
         for l, n in back.items():
             msgs += self.m.reward(l, n) if self.m else []
@@ -370,6 +374,12 @@ class Upgrade:
                 self.p.add_resource(l, n)
         self.log('   Disassembly: %s (level %d) disassembled, fee %s, back %s' % (loot, lv, fee, back))
         RT.note(self.p, 'disassembled_item', loot, lv)          # logbook: log_message_disassembly_finished (%item% from info)
+        if RS.is_item(loot):
+            # the Xeno window finishes the recycle when the next inventory snapshot no longer has the item; the client's text with the amount
+            from legacy_protocol import legacy
+            x = RS.Xeno(self.p, self.log)
+            x.m = self.m
+            msgs += x.inventory() + [legacy('0|A|STM|recycle_resonator_received|%%AMOUNT%%|%d' % sum(back.values()))]
         return msgs + [self.update(key, iid)]
 
     # ------------------------------------------------------------ requests

@@ -9,7 +9,7 @@ const TOKEN = document.querySelector('meta[name="panel-token"]').content;
 const $ = (s, r = document) => r.querySelector(s);
 
 // ------------------------------------------------------------------ dil
-// languages: /api/diller (lang.py LANGUAGES); text not in the dictionary stays in English (the source)
+// languages: /api/languages (lang.py LANGUAGES); text not in the dictionary stays in English (the source)
 const I18N = { lang: 'tr', dict: {}, list: [{ code: 'tr', name: 'Türkçe', local: 'tr-TR', coverage: 100 }, { code: 'en', name: 'English', local: 'en-US', coverage: 100 }] };
 function T(s, ...a) {
   let r = I18N.dict[s] ?? s;
@@ -28,7 +28,8 @@ async function setLang(lang) {
 const guessLang = () => (navigator.languages || [navigator.language || '']).map(x => x.toLowerCase().split('-')[0]).find(langOf) || 'en';
 function applyStatic() {
   const sub = $('#brand-sub'); if (sub) sub.textContent = T('Local Server Panel');
-  // support link at the very bottom of the sidebar (Buy Me a Coffee; opens in the default browser: /api/bagis)
+  const side = $('#side-status'); if (side) side.dataset.label = T('Status');        // the box's heading (panel.css .side-status::before)
+  // support link at the very bottom of the sidebar (Buy Me a Coffee; opens in the default browser: /api/donate)
   const coffee = $('#coffee');
   if (!coffee) return;
   const open_ = () => act(() => api('/api/donate', {}));
@@ -120,7 +121,7 @@ const btn = (label, onclick, cls = '', iconEl = null, props = {}) =>
   h('button', Object.assign({ class: 'btn ' + cls, onclick, type: 'button' }, props), iconEl ? icon(iconEl) : null, label ? h('span', null, label) : null);
 const badge = (text, cls = '') => h('span', { class: 'badge ' + cls }, text);
 const dot = cls => h('span', { class: 'dot ' + (cls || '') });
-const art = (name, cls = 'art') => h('img', { class: cls, src: 'images/' + name + '.webp', sub: '' });   // ui/images/ (Orders.md)
+const art = (name, cls = 'art') => h('img', { class: cls, src: 'images/' + name + '.webp', alt: '' });   // ui/images/ (Orders.md)
 const N = s => s;     // marker for text to be translated: it stays in a variable, shown with T() (test_panel_lang.py collects it)
 const field = (label, ...ctl) => h('div', { class: 'field' }, h('label', null, label), ...ctl);
 
@@ -159,7 +160,7 @@ async function api(path, body) {
     opt.method = 'POST'; opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body);
   }
   let r;
-  try { r = await fetch(path, opt); } catch (e) { throw new Error(T("Can't reach the panel: it may have closed.")); }
+  try { r = await fetch(path, opt); } catch (e) { throw Object.assign(new Error(T("Can't reach the panel: it may have closed.")), { offline: true }); }
   const d = await r.json().catch(() => ({}));
   if (r.status === 403 && d.error && d.error !== 'host' && !api.reloading) { api.reloading = true; location.reload(); }   // the panel restarted
   if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
@@ -185,12 +186,19 @@ function modal({ title, sub, body, foot, wide, onclose }) {
     h('div', { class: 'body' }, body), foot ? h('div', { class: 'foot' }, foot) : null);
   const back = h('div', { class: 'modal-back', onmousedown: e => { if (e.target === back) close(); } }, box);
   function close() { back.remove(); document.removeEventListener('keydown', esc); if (onclose) onclose(); }
-  function esc(e) { if (e.key === 'Escape' && root.lastChild === back) close(); }
+  function esc(e) { if (root.lastChild !== back) return; if (e.key === 'Escape') close(); else if (e.key === 'Tab') trapTab(e, box); }
   document.addEventListener('keydown', esc);
   root.append(back);
   setTimeout(() => { const f = box.querySelector('input:not([type=checkbox]):not([type=range]), textarea'); if (f) f.focus(); }, 30);
   return { close, box };
 }
+// Tab / Shift+Tab stay inside an open window (dialog, setup wizard): from the last control to the first and back, never to the page behind
+function trapTab(e, box) {
+  const f = [...box.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(x => !x.disabled && x.getClientRects().length);
+  const i = f.indexOf(document.activeElement);
+  if (!f.length || i === -1 || (e.shiftKey ? i === 0 : i === f.length - 1)) { e.preventDefault(); if (f.length) f[e.shiftKey ? f.length - 1 : 0].focus(); }
+}
+document.addEventListener('keydown', e => { const w = $('#wizard'); if (e.key === 'Tab' && w && !$('#modal-root')?.childElementCount) trapTab(e, w); });
 function confirmBox(title, text, { ok = T('OK'), danger = false, detail = null } = {}) {
   return new Promise(res => {
     let done = false;
@@ -288,6 +296,7 @@ function renderChrome() {
   const tr = $('#top-right');
   const kids = [];
   if (S.offline) kids.push(h('span', { class: 'pill' }, dot('err'), T('Panel closed')));
+  else if (S.statusError) kids.push(h('span', { class: 'pill', title: S.statusError }, dot('err'), S.statusError.slice(0, 80)));   // the panel answers with an error
   else if (d) {
     if (d.active) kids.push(h('span', { class: 'pill' }, icon('save'), T('Save:') + ' ', h('b', null, d.active.name)));
     const running = st.client === 'on', srv = st.game === 'on';
@@ -323,15 +332,16 @@ function renderChrome() {
 }
 
 async function poll() {
-  try { S.state = await api('/api/status'); S.offline = false; } catch (e) { S.offline = true; }
-  if (S.state?.panel?.updated && S.state.panel.uptime_sec < 60 && !S.updToast) { S.updToast = true; toast(T('The panel was updated and restarted.'), 'ok'); }
-  renderChrome();
-  if (S.page === 'play') { renderPlayBody(); liveTick(); }
-  if (S.page === 'server') renderServerCards();
-  if (S.page === 'friend' && FRD.data) friendsTick();
-  poll.n = (poll.n || 0) + 1;
-  if (poll.n % 3 === 0) auctionEventTick();      // auction notifications (~5 s)
-  setTimeout(poll, S.state?.play?.running ? 500 : 1500);
+  try {
+    try { S.state = await api('/api/status'); S.offline = false; S.statusError = null; } catch (e) { S.offline = !!e.offline; S.statusError = e.offline ? null : e.message; }
+    if (S.state?.panel?.updated && S.state.panel.uptime_sec < 60 && !S.updToast) { S.updToast = true; toast(T('The panel was updated and restarted.'), 'ok'); }
+    renderChrome();
+    if (S.page === 'play') { renderPlayBody(); liveTick(); }
+    if (S.page === 'server') renderServerCards();
+    if (S.page === 'friend' && FRD.data) friendsTick();
+    poll.n = (poll.n || 0) + 1;
+    if (poll.n % 3 === 0) auctionEventTick();      // auction notifications (~5 s)
+  } finally { setTimeout(poll, S.state?.play?.running ? 500 : 1500); }      // a drawing error must not stop the status poll for good
 }
 window.addEventListener('pagehide', () => navigator.sendBeacon && navigator.sendBeacon('/api/closed', '{}'));
 
@@ -343,7 +353,7 @@ function renderPlayBody() {
   if (!root) return;
   if (!d) return;
   const sig = JSON.stringify([d.active, d.processes.servers.web.state, d.processes.servers.game.state, d.processes.client.state,
-    d.processes.client.last, d.play, d.warnings, d.settings_summary, d.events, multiSig(d.multi), S.multiBusy, Math.floor(Date.now() / 30000)]);
+    d.processes.client.last, d.play, d.warnings, d.settings_summary, d.events, multiSig(d.multi), S.multiBusy, d.readiness, Math.floor(Date.now() / 30000)]);
   if (S.sig.play === sig) return;
   S.sig.play = sig;
   const st = srvState(d), a = d.active, o = d.play;
@@ -374,7 +384,7 @@ function renderPlayBody() {
   if (o.running) {
     const prep = o.steps.length && o.steps[o.steps.length - 1].progress;      // BepInEx's first-start preparation (client_patch.warm_up)
     main = h('button', { class: 'play-btn busy' + (prep ? ' prep' : ''), disabled: true, style: prep ? { '--p': prep.percent + '%' } : null },
-      prep ? null : h('span', { class: 'spin', style: { borderTopColor: '#021120' } }), prep ? T('PREPARING') : T('STARTING'));
+      prep ? null : h('span', { class: 'spin', style: { borderTopColor: '#021120' } }), prep || o.images ? T('PREPARING') : T('STARTING'));
   } else if (running) {
     main = h('button', { class: 'play-btn running', disabled: true }, icon('check'), T('GAME RUNNING'));
     sub.push(btn(T('Close the game'), async () => {
@@ -382,9 +392,10 @@ function renderPlayBody() {
         { ok: T('Close'), danger: true })) act(() => api('/api/client/close', {}));
     }, 'danger sm', 'power'));
   } else {
-    main = h('button', { class: 'play-btn', disabled: !a || clientMissing, onclick: () => act(() => api('/api/play', {})) }, icon('play'), T('PLAY'));
+    const launch = (ev, body) => { const b = ev.currentTarget; b.disabled = true; act(() => api('/api/play', body)).then(() => { b.disabled = false; }); };   // a double click: no "Launch in progress." error
+    main = h('button', { class: 'play-btn', disabled: !a || clientMissing, onclick: ev => launch(ev, {}) }, icon('play'), T('PLAY'));
     if (srv) sub.push(btn(T('Stop the server'), () => act(() => api('/api/server/stop', {}), T('Servers stopped.')), 'ghost sm', 'stop'));
-    else sub.push(btn(T('Start the server only'), () => act(() => api('/api/play', { server_only: true })), 'ghost sm', 'server', { disabled: !a }));
+    else sub.push(btn(T('Start the server only'), ev => launch(ev, { server_only: true }), 'ghost sm', 'server', { disabled: !a }));
   }
   const playCol = h('div', { class: 'play-col' }, main, h('div', { class: 'play-sub' }, sub),
     a ? h('div', { class: 'small muted' }, running ? (S.panelCfg?.when_client_closes === 'on' || d.multi?.clients?.length ? T('Have a good flight! The servers stay on when you close the game.')
@@ -395,7 +406,9 @@ function renderPlayBody() {
   let steps = null;
   const recent = o.finished && (Date.now() / 1000 - o.finished < 45);
   if (o.steps.length && (o.running || o.error || recent)) {
-    steps = h('div', { class: 'card' }, h('h2', null, icon('zap'), o.server_only ? T('Server launch') : T('Game launch')),
+    steps = h('div', { class: 'card' }, h('div', { class: 'row between wrap' },
+      h('h2', null, icon('zap'), o.images ? T('Preparing the game images') : o.server_only ? T('Server launch') : T('Game launch')),
+      o.images && o.running ? btn(T('Stop'), () => act(() => api('/api/images/stop', {})), 'ghost sm', 'stop') : null),
       stepList(o.steps));
   }
   const last = d.processes.client.last;
@@ -428,11 +441,11 @@ function renderPlayBody() {
         stText(v) + (v === 'on' && t != null ? ' · ' + fmtDur(t) : ''))))),
     h('div', { class: 'row' }, btn(T('Server and logs'), () => go('server'), 'sm', 'server')));
 
-  root.replaceChildren(...[...warns, hero, steps, early, multiCard(d), srv || S.live?.exists ? liveCard() : null,
+  root.replaceChildren(...[...warns, hero, steps, readyCard(d), early, multiCard(d), srv || S.live?.exists ? liveCard() : null,
     h('div', { class: 'grid g3' }, setCard, evCard, srvCard)].filter(Boolean));
 }
 
-// ---- multiple clients (multi_client.py, /api/coklu): after PLAY, extra clients to the same server with the other saves
+// ---- multiple clients (multi_client.py, /api/multi): after PLAY, extra clients to the same server with the other saves
 const multiSig = c => c && JSON.stringify(Object.assign({}, c, { clients: (c.clients || []).map(x => Object.assign({}, x, { duration_sec: null })) }));
 async function openExtra(id, pilot) {
   S.multiBusy = id; S.sig.play = null; renderPlayBody();
@@ -498,11 +511,33 @@ function multiCard(d) {
       : !c.setting ? null : h('div', { class: 'small muted' }, T('No other save to open.')));
 }
 
-// ---- live status (the game server's live_status.json; live_status.py, /api/canli)
+// ---- readiness (panel.readiness): client, BepInEx plugin, the game images; only while something is missing. The images (the plugin's dump) feed the
+// character editor, the in-game pages and the World Editor; "Prepare the game images" makes them without playing (panel.prepare_images)
+function readyCard(d) {
+  const r = d.readiness;
+  if (!r || (r.client && r.plugin && r.images)) return null;
+  const game = srvState(d).client === 'on', busy = d.play.running;
+  const item = (ok, label) => h('span', { class: 'ready-item ' + (ok ? 'ok' : 'miss') }, icon(ok ? 'check' : 'x'), label);
+  return h('div', { class: 'card ready-card' }, h('div', { class: 'row between wrap' },
+    h('div', { class: 'row wrap', style: { gap: '14px' } }, item(r.client, T('Game client')), item(r.plugin, T('BepInEx plugin')), item(r.images, T('Game images'))),
+    btn(T('Prepare the game images'), () => prepareImages(), 'primary sm', 'zap', { disabled: !r.client || game || busy })),
+    h('div', { class: 'small muted' }, !r.client ? T('Choose or download the game on the Client page first.') : game ? T('Close the game first: the images are made in a separate start of the client.')
+      : T("The character editor, the in-game pages and the World Editor show the game's own icons. Preparing installs BepInEx if needed and starts the client once without a window; it closes by itself (about a minute).")));
+}
+// shared by the hints of the character editor, the shop page and the World Editor's item picker (stay: do not leave the page, the progress is on the Play page)
+async function prepareImages(stay) {
+  if (!await act(() => api('/api/images/prepare', {}), stay ? T('Preparing the game images: you can follow it on the Play page.') : null)) return;
+  if (S.page !== 'play' && !stay) go('play');
+  else S.sig.play = null;                         // the next status poll draws the steps
+}
+const imagesButton = (cls = 'sm') => btn(T('Prepare the game images'), () => prepareImages(), cls, 'zap');
+
+// ---- live status (the game server's live_status.json; live_status.py, /api/live)
 async function liveTick() {
   if (S.page !== 'play' || S.liveBusy) return;
   S.liveBusy = true;
   try { S.live = await api('/api/live'); } catch (e) { S.live = null; } finally { S.liveBusy = false; }
+  loopRecord(S.live);
   const c = $('#live-card'), want = srvState(S.state).game === 'on' || !!S.live?.exists;
   if (c && want) c.replaceWith(liveCard());
   else if (!!c !== want) { S.sig.play = null; renderPlayBody(); }     // let the card appear / disappear
@@ -512,21 +547,54 @@ function meter(label, v, max, cls) {
   return h('div', { class: 'meter ' + (cls || '') }, h('div', { class: 'row between small' }, h('span', { class: 'muted' }, label), h('b', null, fmtN(v) + ' / ' + fmtN(max))),
     h('div', { class: 'meter-bar' }, h('span', { style: { width: pct + '%' } })));
 }
+// the world loop's history (page memory only, the last LOOP_KEEP_SEC): one entry per new status file; the counters restart on a map change
+const LOOP_KEEP_SEC = 300;
+function loopRecord(r) {
+  const l = r?.exists && r.state.world?.loop, H = S.loopHist ||= [];
+  if (!l || (H.length && H[H.length - 1].t === r.state.time)) return;
+  H.push({ t: r.state.time, avg: l.avg_ms, slow: l.slow });
+  while (H[0].t < r.state.time - LOOP_KEEP_SEC) H.shift();
+}
+// slow: the average over the server's own slow-step threshold (world.Metrics.SLOW_MS), or the slow-step counter rose in each of the last three readings
+function loopSlow(l) {
+  const H = S.loopHist || [], n = H.length;
+  return l.avg_ms > (l.slow_ms || 50) || (n >= 4 && [1, 2, 3].every(i => H[n - i].slow > H[n - i - 1].slow));
+}
+function loopSpark(lim) {
+  const H = S.loopHist || [];
+  if (H.length < 2) return null;
+  const W = 160, Hh = 26, t0 = H[H.length - 1].t - LOOP_KEEP_SEC, top = Math.max(lim * 1.5, ...H.map(e => e.avg));
+  const X = t => ((t - t0) / LOOP_KEEP_SEC * W).toFixed(1), Y = v => (Hh - v / top * Hh).toFixed(1);
+  const el = (n, a) => { const e = document.createElementNS(SVGNS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const svg = el('svg', { viewBox: `0 0 ${W} ${Hh}`, class: 'loop-spark', preserveAspectRatio: 'none', role: 'img', 'aria-label': T('Loop step, last 5 minutes') });
+  svg.append(el('title', {}), el('line', { x1: 0, x2: W, y1: Y(lim), y2: Y(lim), class: 'lim' }),
+    el('polyline', { points: H.map(e => X(e.t) + ',' + Y(e.avg)).join(' '), class: 'avg' }));
+  svg.firstChild.textContent = T('Loop step, last 5 minutes');
+  return svg;
+}
 function liveCard() {
   const r = S.live;
   const head = h('h2', null, icon('zap'), T('Live status'));
   if (!r || !r.exists) return h('div', { class: 'card', id: 'live-card' }, head, h('p', { class: 'desc' }, T("Waiting for the game server's status…")));
-  const d = r.state, w = d.world || {}, g = d.ship, p = d.pilot, k = d.position;
+  const d = r.state, w = d.world || {}, g = d.ship, p = d.pilot, k = d.position, bots = d.bots, slow = w.loop && loopSlow(w.loop);
   const flags = [d.connected ? badge(T('Client connected'), 'ok') : badge(T('Client not connected'), ''), r.age > 10 ? badge(T('Status {0} s old', Math.round(r.age)), 'warn') : null,
     w.dead ? badge(T('Ship destroyed'), 'err') : null, w.in_combat ? badge(T('In combat'), 'orange') : null, w.safe ? badge(T('In a safe zone'), 'info') : null];
   const facts = [[T('Map'), `${k.map} (${fmtN(k.x)}, ${fmtN(k.y)})`], [T('Ship'), (g.name || '').replace('ship_', '')], [T('Aliens'), w.alien != null ? fmtN(w.alien) : '—'],
     [T('Boxes / ore'), w.box != null ? fmtN(w.box) + ' / ' + fmtN(w.ore) : '—'], [T('Target'), w.target || '—'], [T('Play time'), fmtDur(d.play_sec)]];
   if (w.gate) facts.push([T('Gate'), `${w.gate.name || ''}${w.gate.wave ? ' · ' + w.gate.wave : ''}${w.gate.stage ? ' · ' + w.gate.stage : ''}`]);
-  if (w.loop) facts.push([T('Loop'), T('{0} ms avg. · max {1} ms', w.loop.avg_ms, w.loop.max_ms) + (w.loop.slow ? ' · ' + T('{0} slow ticks', fmtN(w.loop.slow)) : '')]);
-  return h('div', { class: 'card', id: 'live-card' }, h('div', { class: 'row between wrap' }, head, h('div', { class: 'row wrap', style: { gap: '6px' } }, flags)),
+  if (bots) facts.push([T('Bots online'), fmtN(bots.online) + ' / ' + fmtN(bots.total)]);
+  if (bots && w.bot_ships != null) facts.push([T('Bot ships on your map'), fmtN(w.bot_ships) + ' / ' + fmtN(bots.max_concrete)]);
+  if (w.loop) facts.push([T('Loop'), T('{0} ms avg. · max {1} ms', w.loop.avg_ms, w.loop.max_ms) + (w.loop.slow ? ' · ' + T('{0} slow ticks', fmtN(w.loop.slow)) : ''), slow ? 'warn' : '']);
+  const spark = w.loop && loopSpark(w.loop.slow_ms || 50);
+  const warn = slow ? h('div', { class: 'alert warning', style: { marginTop: '12px' } }, icon('alert'), h('div', null, bots
+    ? T('The game server is falling behind and the game may stutter: on the Bots page lower "Most online at the same time" or "Most shown as ships on your map".')
+    : T('The game server is falling behind and the game may stutter: close other heavy programs or lower "Alien count" in the settings.')),
+    bots ? btn(T('Bots'), () => go('bots'), 'sm') : btn(T('Settings'), () => go('settings'), 'sm')) : null;
+  return h('div', { class: 'card', id: 'live-card' }, h('div', { class: 'row between wrap' }, head, h('div', { class: 'row wrap', style: { gap: '6px' } }, flags)), warn,
     h('div', { class: 'grid g2', style: { marginTop: '12px' } },
       h('div', { class: 'stack', style: { gap: '10px' } }, meter(T('Hit points'), g.hp, g.max_hp, 'hp'), meter(T('Shield'), g.shield, g.shield_max, 'sh'), meter(T('Cargo'), g.cargo, g.cargo_max, 'cg')),
-      h('div', { class: 'kv one' }, facts.map(([a, b]) => h('div', null, h('span', { class: 'muted' }, a), h('b', { title: b }, b))))),
+      h('div', { class: 'kv one' }, facts.map(([a, b, cls]) => h('div', null, h('span', { class: 'muted' }, a), h('b', { title: b, class: cls || null }, b))),
+        spark ? h('div', { class: 'loop-row' + (slow ? ' warn' : '') }, h('span', { class: 'muted' }, T('Last 5 minutes')), spark) : null)),
     h('div', { class: 'live-sub' }, h('div', { class: 'stats', style: { marginTop: 0 } },
       [[T('Level'), p.level, 'lv'], [T('Credits'), p.credits, 'cr'], [T('Uridium'), p.uridium, 'ur'], [T('Honor'), p.honor, 'hn']].map(([a, v, c]) =>
         h('div', { class: 'stat' }, h('div', { class: 'k' }, a), h('div', { class: 'v ' + c }, fmtN(v))))),
@@ -541,7 +609,7 @@ async function switchSaveMenu(anchor) {
   })), '-', { label: T('New save…'), ic: 'plus', fn: () => newSaveModal() }, { label: T('Manage saves'), ic: 'save', fn: () => go('saves') }]);
 }
 
-// ================================================================== PLAY WITH YOUR FRIENDS (friends.py, /api/arkadas)
+// ================================================================== PLAY WITH YOUR FRIENDS (friends.py, /api/friend)
 const IP_KIND = { local: [N('Home network'), 'ok'], radmin: [N('Radmin VPN'), 'info'], tailscale: [N('Tailscale'), 'info'], general: [N('Public'), 'orange'],
   connection: [N('Link-local'), ''] };
 const FRD_STATUS = { connecting: [N('Connecting'), 'info'], in_game: [N('In game'), 'ok'], leaving: [N('Leaving'), 'orange'], finished: [N('Left'), ''],
@@ -595,16 +663,19 @@ const stepList = list => h('div', { class: 'steps' }, list.map(s => [h('div', { 
 
 // BepInEx's first-start preparation (client_patch.warm_up/progress): the game window is not visible yet, so the player does not think the game failed to open
 const PREP_STAGE = [N('Starting the client'), N('Generating bridge assemblies'), N('Writing files')];
+const IMAGE_STAGE = [N('Starting the client'), N('Writing the game images')];       // client_patch.image_progress
 function prepBox(p) {
+  const images = p.kind === 'images', alone = S.state?.play?.images;       // alone: "Prepare the game images", no game opens afterwards
   return h('div', { class: 'prep' },
-    h('div', { class: 'prep-head' }, icon('zap'), h('span', null, T('Preparing the fixes for the first launch')), h('b', null, '%' + p.percent)),
+    h('div', { class: 'prep-head' }, icon('zap'), h('span', null, images ? T('Preparing the game images') : T('Preparing the fixes for the first launch')), h('b', null, '%' + p.percent)),
     h('div', { class: 'meter' }, h('div', { class: 'meter-bar' }, h('span', { style: { width: p.percent + '%' } }))),
-    h('div', { class: 'prep-stages' }, PREP_STAGE.map((a, i) => {
+    h('div', { class: 'prep-stages' }, (images ? IMAGE_STAGE : PREP_STAGE).map((a, i) => {
       const st = i < p.stage ? 'done' : i === p.stage ? 'running' : 'waiting';
       return h('div', { class: 'prep-stage ' + st }, h('span', { class: 'ic' }, st === 'done' ? icon('check') : st === 'running'
         ? h('span', { class: 'spin' }) : h('span', { class: 'dot-sm' })), h('span', null, T(a)));
     })),
-    h('div', { class: 'small muted' }, T("This happens only once, on the first launch; the game window stays hidden meanwhile. When it's done the game opens by itself, you don't need to press anything."),
+    h('div', { class: 'small muted' }, alone ? T('The client runs without a window and closes by itself when this is done; no game opens. You can stop it at any time: nothing is left half-prepared.')
+      : T("This happens only once, on the first launch; the game window stays hidden meanwhile. When it's done the game opens by itself, you don't need to press anything."),
       ' ', h('span', { class: 'dim' }, T('Elapsed: {0}', fmtDur(p.elapsed_sec)))));
 }
 
@@ -896,6 +967,37 @@ function markChanged() {
   if (S.settingsFilter && document.querySelector('.set-tools')) S.settingsFilter(true);
 }
 
+// ---- sharing a settings template (panel.py template_code / read_template_code): a short code for chat or a file, imported after a preview
+async function shareTemplate(src) {
+  const r = await act(() => api('/api/settings/export_code', src)); if (!r) return;
+  const box = h('textarea', { class: 'input mono', readonly: true, rows: 4, onfocus: e => e.target.select() }, r.code);
+  modal({ title: T('Share "{0}"', r.name), sub: T('{0} settings · {1} characters', r.count, r.code.length),
+    body: [h('p', { class: 'desc' }, T('Paste this code in Discord or send the file: the other player imports it on their Settings page. Event choices are not included.')), box],
+    foot: [btn(T('Save as file'), async () => { const x = await act(() => api('/api/settings/export_file', src)); if (x && !x.cancelled) toast(T('Saved: {0}', x.route), 'ok'); }, 'ghost', 'download'),
+      btn(T('Copy code'), () => navigator.clipboard.writeText(r.code).then(() => toast(T('Code copied.'), 'ok'), () => box.select()), 'primary', 'copy')] });
+}
+function importTemplate() {
+  const inp = h('textarea', { class: 'input mono', rows: 4, placeholder: 'OOT1.…' });
+  const m = modal({ title: T('Import a settings template'), body: [h('p', { class: 'desc' }, T('Paste a settings code, or open a template file.')), inp],
+    foot: [btn(T('Open file…'), async () => { const r = await act(() => api('/api/settings/import_file', {})); if (r && !r.cancelled) { m.close(); importPreview(r); } }, 'ghost', 'folder'),
+      btn(T('Cancel'), () => m.close(), 'ghost'),
+      btn(T('Check'), async () => { const r = await act(() => api('/api/settings/import_check', { code: inp.value })); if (r) { m.close(); importPreview(r); } }, 'primary', 'check')] });
+}
+function importPreview(r) {
+  const name = h('input', { class: 'input', value: r.name, maxlength: 40 });
+  const label = k => (S.setting?.schema || []).find(s => s.key === k)?.name || k;
+  const list = (title, items) => items.length ? h('div', { class: 'small muted' }, title + ' ' + items.slice(0, 12).join(', ') + (items.length > 12 ? ' …' : '')) : null;
+  const m = modal({ title: T('Import "{0}"', r.name), body: [
+    h('p', null, T('{0} settings are saved as a template; apply it afterwards from the Presets card.', r.count)), field(T('Template name'), name),
+    list(T('Left out (unknown here, or not part of a template):'), r.dropped), list(T('Refused (invalid value):'), r.refused.map(label)),
+    list(T('Limited to the allowed range:'), r.clamped.map(([k, a, b]) => `${label(k)} ${a} → ${b}`))],
+    foot: [btn(T('Cancel'), () => m.close(), 'ghost'), btn(T('Import'), async () => {
+      const n = name.value.trim() || r.name, exists = Object.hasOwn(S.setting?.templates || {}, n);
+      if (exists && !await confirmBox(T('Replace the template?'), T('A template named "{0}" already exists: it will be replaced.', n), { ok: T('Replace'), danger: true })) return;
+      if (await act(() => api('/api/settings/import_template', { code: r.code, name: n, overwrite: exists }), T('Template "{0}" imported.', n))) { m.close(); renderSettings(); }
+    }, 'primary', 'download')] });
+}
+
 async function renderSettings() {
   const r = await act(() => api('/api/settings')); if (!r || S.page !== 'settings') return;
   S.setting = r;
@@ -905,10 +1007,11 @@ async function renderSettings() {
       act(() => api('/api/settings/presets', { name: key }), T('"{0}" applied.', p.name)).then(renderSettings);
   } }, h('b', null, p.name), h('span', null, p.description)));
   const user = Object.entries(r.templates || {}).map(([key, p]) => h('div', { class: 'preset', onclick: async e => {
-    if (e.target.closest('.x')) return;
+    if (e.target.closest('.x, .share')) return;
     if (await confirmBox(T('Apply "{0}"?', p.name), T("All game settings switch to this template's values."), { ok: T('Apply') }))
       act(() => api('/api/settings/presets', { name: key }), T('"{0}" applied.', p.name)).then(renderSettings);
   } }, h('b', null, '★ ', p.name), h('span', null, T('{0} changes', Object.keys(p.values).length)),
+    btn('', () => shareTemplate({ name: key }), 'ghost sm icon share', 'link', { title: T('Share') }),
     btn('', async () => { if (await confirmBox(T('Delete the template?'), T('The template "{0}" will be deleted.', p.name), { ok: T('Delete'), danger: true })) act(() => api('/api/settings/delete_template', { name: key })).then(renderSettings); }, 'ghost sm icon x', 'x', { title: T('Delete') })));
   const copySel = h('select', { class: 'input', style: { maxWidth: '240px' } }, (r.saves || []).map(k => h('option', { value: k.id }, k.name)));
   const saveCard = r.record ? h('div', { class: 'card' }, h('h2', null, icon('save'), T("This save's settings: {0}", r.save_name)),
@@ -923,8 +1026,10 @@ async function renderSettings() {
   const presetCard = h('div', { class: 'card' }, h('h2', null, icon('star'), T('Presets')),
     h('p', { class: 'desc' }, T('Apply a set of settings with one click, or keep your current settings as a template.')),
     h('div', { class: 'preset-bar' }, presets, user),
-    h('div', { class: 'row', style: { marginTop: '12px' } },
+    h('div', { class: 'row wrap', style: { marginTop: '12px' } },
       btn(T('Save the current settings as a template'), async () => { const v = await promptBox(T('Save as template'), T('Template name'), ''); if (v) act(() => api('/api/settings/save_template', { name: v }), T('Template saved.')).then(renderSettings); }, 'sm', 'save'),
+      btn(T('Share the current settings'), () => shareTemplate({ current: true }), 'ghost sm', 'link'),
+      btn(T('Import a template'), () => importTemplate(), 'ghost sm', 'download'),
       h('span', { class: 'spacer' }),
       btn(T('Reset all to defaults'), async () => { if (await confirmBox(T('Reset to defaults?'), T("All game settings go back to their defaults (your event choices don't change)."), { ok: T('Revert') })) act(() => api('/api/settings/reset', {}), T('Back to defaults.')).then(renderSettings); }, 'ghost sm', 'undo')));
   const info = h('div', { class: 'alert info' }, icon('info'), h('div', null,
@@ -1218,7 +1323,7 @@ function drawEventList() {
   box.replaceChildren(...(groups.length ? groups : [h('div', { class: 'empty' }, art('empty_event'), h('div', null, T('No matching events.')))]));
 }
 
-// ================================================================== EVENT CALENDAR (event_schedule.py, /api/takvim)
+// ================================================================== EVENT CALENDAR (event_schedule.py, /api/calendar)
 // Views: hourly (the 24 hours of the selected day, rows and sessions), daily (the day's detailed list), weekly (7 days from Monday),
 // monthly (6-week grid). Bar: filled per the calendar, outlined if manually open, faded if manually closed. Times are local time.
 const CAL = { appearance: 'weekly', day: null, filter_by: { yearly: true, weekly: true, session: true }, search: '', data: null, coverage: null };
@@ -1432,7 +1537,7 @@ function resolutionList(r) {
   return { res, scr };
 }
 
-// ---- downloading the game (client_download.py, /api/istemci/indirme): the wizard's game folder step and the Client page
+// ---- downloading the game (client_download.py, /api/client/download_status): the wizard's game folder step and the Client page
 const DL_ACTIVE = st => st.running || st.partial || ['error', 'stopped', 'finished'].includes(st.state);
 const dlPct = st => st.total ? Math.floor(100 * st.claimed / st.total) : 0;
 function dlBox(st, refresh, { haveClient = false } = {}) {      // haveClient: there is a valid client, partial files are only deleted
@@ -1484,7 +1589,7 @@ function dlWatch(wrap, st, onDone, opts) {
   return id;
 }
 
-// ---- macOS: the Wine + DXMT and Rosetta 2 the panel installs (wine_engine.py, /api/motor): the Wine / Proton card and the wizard's game folder step
+// ---- macOS: the Wine + DXMT and Rosetta 2 the panel installs (wine_engine.py, /api/engine): the Wine / Proton card and the wizard's game folder step
 function engineBox(m, refresh, { engine = true } = {}) {
   const call = (path, msg) => act(() => api(path, {}), msg).then(x => { if (x) refresh(x); });
   const pct = m.total ? Math.floor(100 * m.claimed / m.total) : 0, run = m.running, ros = m.rosetta;
@@ -1523,7 +1628,7 @@ function engineWatch(wrap, m, opts) {
   return id;
 }
 
-// ---- BepInEx, which loads the client's fixes (client_patch.py, /api/yama): the Client page and the wizard's game folder step
+// ---- BepInEx, which loads the client's fixes (client_patch.py, /api/patch): the Client page and the wizard's game folder step
 function patchBox(y, refresh) {
   const call = path => act(() => api(path, {})).then(x => { if (x) refresh(x); });
   const pct = y.total ? Math.floor(100 * y.claimed / y.total) : 0, run = y.running;
@@ -1553,7 +1658,7 @@ function patchWatch(wrap, y) {
   return id;
 }
 
-// ---- Linux and macOS: the Wine or Proton that starts the client (client_runner.py; /api/istemci 'runner', null on Windows)
+// ---- Linux and macOS: the Wine or Proton that starts the client (client_runner.py; /api/client 'runner', null on Windows)
 function runnerCard(c, cfg, saveCfg) {
   const mac = c.platform === 'darwin';
   const kinds = [['auto', T('Automatic')], ['engine', T("Panel's Wine")], ['wine', 'Wine'], ['proton', 'Proton'], ['special', T('Custom command')]]
@@ -1586,6 +1691,7 @@ function runnerCard(c, cfg, saveCfg) {
 
 async function renderClient(data) {
   const r = data || await act(() => api('/api/client')); if (!r || S.page !== 'client') return;
+  S.timers.forEach(clearInterval); S.timers = [];          // redrawn after every setting: the previous drawing's refreshes stop
   const c = r.control, cfg = r.settings;
   const dlWrap = !c.valid || DL_ACTIVE(r.download) ? h('div', { class: 'dl-wrap' }) : null;
   const yWrap = c.valid && r.patch.required ? h('div', { class: 'dl-wrap' }) : null;
@@ -1655,7 +1761,7 @@ async function renderClient(data) {
   S.timers.push(setInterval(() => protoTick(), 1000));
 }
 
-// ---- protocol adaptation to a new client (tools/il2cpp/protocol_update.py; protocol_builds.py, /api/protokol)
+// ---- protocol adaptation to a new client (tools/il2cpp/protocol_update.py; protocol_builds.py, /api/protocol)
 async function protoTick(force) {
   const box = $('#proto-box'); if (!box) return;
   if (!force && !(S.proto && S.proto.running)) return;
@@ -1688,6 +1794,7 @@ async function protoTick(force) {
 let logState = { name: 'gs.log', row: 400, filter_by: '', auto: true };
 async function renderServer() {
   const cfg = await act(() => api('/api/panel_settings')); if (!cfg || S.page !== 'server') return;
+  S.timers.forEach(clearInterval); S.timers = [];          // redrawn after every setting: one live log refresh
   S.panelCfg = cfg;
   const saveCfg = vals => act(() => api('/api/panel_settings', { values: vals }), T('Saved.')).then(() => renderServer());
   const seg = (key, opts) => h('div', { class: 'seg' }, opts.map(([k, t]) => h('button', { class: cfg[key] === k ? 'on info' : '', onclick: () => saveCfg({ [key]: k }) }, t)));
@@ -1761,7 +1868,7 @@ function showLog(name) { logState.name = name; loadLog(); const v = $('#log-view
 async function loadLog(quiet) {
   const view = $('#log-view'); if (!view) return;
   let r;
-  try { r = await api('/api/log?name=' + encodeURIComponent(logState.name) + '&satir=' + logState.row); } catch (e) { if (!quiet) toast(e.message, 'err'); return; }
+  try { r = await api('/api/log?name=' + encodeURIComponent(logState.name) + '&row=' + logState.row); } catch (e) { if (!quiet) toast(e.message, 'err'); return; }
   const tabs = $('#log-tabs');
   if (tabs) tabs.replaceChildren(...r.entries.map(g => h('button', { class: 'btn sm ' + (g.name === logState.name ? 'primary' : 'ghost'), onclick: () => { logState.name = g.name; loadLog(); } },
     g.name, g.size != null ? h('span', { class: 'dim', style: { fontWeight: 400 } }, fmtBytes(g.size)) : null)));
@@ -1780,7 +1887,7 @@ async function loadLog(quiet) {
 }
 
 // ================================================================== PANEL
-// ---- updates (updater.py, /api/guncelleme): the latest version on GitHub, automatic installation
+// ---- updates (updater.py, /api/update): the latest version on GitHub, automatic installation
 const UPD_TEXT = { up_to_date: N('The panel is up to date.'), var: N('A new version is available.'), downloading: N('Downloading the new version…'), installing: N('Installing the new version…'),
   installed: N('New version installed: if the game and servers are closed, the panel restarts now.'), unknown: N('Not checked yet.'),
   local_changes: N("There is a new version on GitHub, but this copy has local changes: get the update with git."),
@@ -1857,8 +1964,8 @@ function rpCard() {
     const g = e && e.assets || {};
     const preview = h('div', { class: 'rp-card' + (on && e ? '' : ' empty') }, h('div', { class: 'rp-top' }, T('Playing')),
       on && e ? h('div', { class: 'rp-inner' },
-        h('div', { class: 'rp-image' }, g.large_image ? h('img', { class: 'rp-large', src: local(g.large_image), sub: '', title: g.large_text || '' }) : null,
-          g.small_image ? h('img', { class: 'rp-small', src: local(g.small_image), sub: '', title: g.small_text || '' }) : null),
+        h('div', { class: 'rp-image' }, g.large_image ? h('img', { class: 'rp-large', src: local(g.large_image), alt: '', title: g.large_text || '' }) : null,
+          g.small_image ? h('img', { class: 'rp-small', src: local(g.small_image), alt: '', title: g.small_text || '' }) : null),
         h('div', { class: 'rp-text' }, h('b', null, 'OpenOrbit'), h('div', null, e.details),
           h('div', null, e.state, e.party ? ` (${T('{0} of {1}', e.party.size[0], e.party.size[1])})` : ''),
           start ? h('div', { class: 'rp-time' }, duration()) : null)) : h('div', { class: 'small muted' }, on ? T('Nothing is shown on your profile right now.') : T('Rich Presence is off.')),
@@ -1881,6 +1988,7 @@ function rpCard() {
 
 async function renderPanel() {
   const r = await act(() => api('/api/about')); if (!r || S.page !== 'panel') return;
+  S.timers.forEach(clearInterval); S.timers = [];          // redrawn after Create shortcut: the old cards' refreshes stop
   const pathRow = (label, p, ne) => h('div', { class: 'set-row' }, h('div', null, h('div', { class: 'name' }, label), h('div', { class: 'help mono' }, p)),
     h('div', { class: 'ctl' }, ne ? btn(T('Open'), () => act(() => api('/api/open_folder', { what: ne })), 'sm', 'folder') : null));
   const langSeg = h('div', { class: 'seg diller' }, I18N.list.map(({ code: k, name: t }) => h('button', { class: I18N.lang === k ? 'on info' : '', onclick: async () => {
@@ -1968,7 +2076,7 @@ async function drawWizard() {
     WZ.step > 0 ? btn(T('Back'), () => wzGo(WZ.step - 1), '', 'arrowL') : null,
     p.extra || null, nextBtn);
   root.replaceChildren(h('div', { class: 'wz-box' },
-    h('div', { class: 'wz-head' }, h('img', { src: 'images/emblem.webp', sub: '' }),
+    h('div', { class: 'wz-head' }, h('img', { src: 'images/emblem.webp', alt: '' }),
       h('div', null, h('div', { class: 'wz-brand' }, 'OPENORBIT'), h('div', { class: 'wz-kicker' }, WZ.step === 0 ? 'Kurulum · Setup' : T('Setup'))), steps),
     h('div', { class: 'wz-body' }, h('div', { class: 'wz-main' }, h('h2', null, p.title), p.sub ? h('div', { class: 'wz-sub' }, p.sub) : null, p.content),
       art('drone_' + id, 'wz-art')),
@@ -2192,7 +2300,7 @@ const gameIcon = (lid, size, firma, iconEl = 'hangar') => {
 };
 
 // ---- item tooltip: on hovering over the icon the game's texts (the plugin's dump metinler_<lang>.json: name, type, tooltip description,
-// description, note, source; attribute names; English if missing in the language) and the server's values (/api/esya_bilgi: damage, shield, bonuses,
+// description, note, source; attribute names; English if missing in the language) and the server's values (/api/item_info: damage, shield, bonuses,
 // ships, upgrade, sale). Instance-specific info (upgrade level, random attributes, allowance) is in the _item of the icon's parent.
 const IP = { text: null, en: null, lang: null, info: null, el: null, time: 0, box: null, loading: null };
 const HINT_LABEL = { damage: N('Damage'), pvp_damage: N('Damage to players'), shield: N('Shield'), absorb: N('Damage absorption'), speed: N('Speed'), hp: N('Hit points'), cargo: N('Cargo'),
@@ -2291,7 +2399,7 @@ document.addEventListener('mouseover', e => {
 });
 document.addEventListener('mousedown', closeHint, true);
 document.addEventListener('scroll', closeHint, true);
-const formatMoney = (cur, n) => fmtN(n) + (cur === 'credits' || cur === 'credits' ? ' C.' : ' U.');
+const formatMoney = (cur, n) => fmtN(n) + (cur === 'credits' ? ' C.' : ' U.');
 // the server's error and info keys (BaseKey names, panel_channel's own keys); raw text (with spaces) as it is
 const GAME_TEXT = { not_enough_credits: N('You do not have enough credits.'), not_enough_uridium: N('You do not have enough uridium.'), shop_item_not_found: N('This item is not on sale right now.'),
   drone_have_max: N('You already have the maximum number of drones.'), info_text_switch_hangar_station_only: N('You can only change ships while at a station.'),
@@ -2314,6 +2422,7 @@ function gameHeader(v, page, ...extras) {
         dot(v.in_station ? 'ok' : 'warn'), v.in_station ? T('In a safe zone') : T('In space')), ...extras));
 }
 function gameError(e, page) {
+  if (S.page !== page) return;                     // the answer came after the user left the page
   $('#content').replaceChildren(h('div', { class: 'card' }, h('div', { class: 'empty' }, h('p', null, e.message), btn(T('Refresh'), () => go(page), '', 'refresh'))));
 }
 
@@ -2325,6 +2434,7 @@ const SHP = { data: null, multiplier: null, search: '', level: {} };
 async function renderShop() {
   await loadGameImages();
   try { SHP.data = await api('/api/game/shop'); } catch (e) { return gameError(e, 'shop'); }
+  if (S.page !== 'shop') return;
   if (!SHP.data.categories.includes(SHP.multiplier)) SHP.multiplier = SHP.data.categories[0];
   const grid = h('div', { class: 'shop-grid' });
   const entries = () => {
@@ -2336,7 +2446,7 @@ async function renderShop() {
   $('#content').replaceChildren(h('div', { class: 'stack' },
     gameHeader(SHP.data, 'shop', search, btn(null, () => renderShop(), 'icon', 'refresh', { title: T('Refresh') })),
     h('div', { class: 'card' },
-      !SHP.data.visual ? h('p', { class: 'desc' }, T('The game images are prepared once the game has been started with BepInEx.')) : null,
+      !SHP.data.visual ? h('div', { class: 'row wrap images-hint' }, h('span', { class: 'desc' }, T('The game images are not prepared yet: items show without their icons.')), imagesButton()) : null,
       h('div', { class: 'seg', style: { flexWrap: 'wrap' } }, SHP.data.categories.map(c =>
         h('button', { class: c === SHP.multiplier ? 'on info' : '', onclick: () => { SHP.multiplier = c; renderShop(); } }, SHP_CATEGORY[c] ? T(SHP_CATEGORY[c]) : c)))),
     grid));
@@ -2393,6 +2503,7 @@ async function renderHangar() {
   await loadGameImages();
   let v;
   try { v = await api('/api/game/hangar?ship=' + encodeURIComponent(HG.ship || '')); } catch (e) { return gameError(e, 'hangar'); }
+  if (S.page !== 'hangar') return;
   HG.ship = v.ship;
   if (!v.configs[HG.config]) HG.config = v.active_config;
   if (HG.section === 'pet' && !v.pet) HG.section = 'ship';
@@ -2611,6 +2722,7 @@ async function renderSkylab() {
   await loadGameImages();
   let v;
   try { v = await api('/api/game/skylab'); } catch (e) { return gameError(e, 'skylab'); }
+  if (S.page !== 'skylab') return;
   const oreIcon = (name, size) => GI.index?.sprite[name + '_100x100'] ? sprite(name + '_100x100', size) : h('span', { class: 'sprite vacant', style: { width: size + 'px', height: size + 'px' } }, icon('lab'));
   const storage = v.storage.map(o => h('div', { class: 'sk-ore' }, oreIcon(o.name.toLowerCase(), 44),
     h('div', { class: 'grow' }, h('div', { class: 'row between' }, h('b', null, oreName(o.name)), h('span', { class: 'mono' }, fmtN(o.amount) + ' / ' + fmtN(o.capacity))),
@@ -2703,7 +2815,6 @@ const AUCTION_STATUS = [['all', N('All')], ['bid', N('My bids')], ['leading', N(
 Object.assign(GAME_TEXT, { auction_bid_minBid_not_reached: N('The bid must be at least 10,000 credits above the highest bid.'), auction_bid_credits_to_little: N('You do not have enough credits.'),
   auction_buy_instant_invalid: N('This lot cannot be bought instantly.'), items_shop_error_ship_contains_ship: N('You already own this ship.'), auction_error_generic: N('The auction action failed.') });
 const MZ = { type: 'all', group: 'all', state: 'all', search: '', end_time: {}, last: null };
-const auctionKey = l => l.type + '|' + l.loot;
 function auctionEventText(o) {
   const name = itemName(o.loot);
   return { outbid: () => T('You were outbid: {0}', name), ending: () => T('{1} min left for {0}.', name, o.min), won: () => T('Won: {0} ({1})', name, formatMoney('credits', o.price)),
@@ -2716,6 +2827,8 @@ async function renderAuction() {
   await loadGameImages();
   let v;
   try { v = await api('/api/game/auction'); } catch (e) { return gameError(e, 'auction'); }
+  if (S.page !== 'auction') return;
+  S.timers.forEach(clearInterval); S.timers = [];          // redrawn after every filter, bid and event: one counter refresh
   const now = Date.now() / 1000;
   for (const [k, n] of Object.entries(v.remaining)) MZ.end_time[k] = now + n;
   if (v.events.length) MZ.last = Math.max(MZ.last || 0, v.events[0].no);

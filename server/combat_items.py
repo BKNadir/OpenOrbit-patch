@@ -36,7 +36,7 @@ ROCKETS = _E['rockets']
 MINES = S['mines']
 # Curcubitor's Trick mine is born when the event alien dies; the player neither buys nor places it: it stays in MINES for damage and visuals,
 # removed from inventory and menu operations
-EVENT_MINES = frozenset({'curcubitor_mayini'})
+EVENT_MINES = frozenset({'curcubitor_mayini', 'ammunition_mine_ice-01'})      # + Iceterion's IceMine (labyrinth.py)
 PLAYER_MINES = frozenset(MINES) - EVENT_MINES
 LAUNCHERS = S['launcher']['kinds']
 LAUNCHER_AMMO = S['launcher_ammo']
@@ -111,6 +111,11 @@ def ammo_kind(loot):
 
 def special(rocket):
     return bool(ROCKETS.get(rocket, {}).get('special'))
+
+
+def rocket_range(rocket):
+    """The rocket's firing range (npc.json combat.rocket_ranges <- the client's Ammunition table; recordings 450/488/525)."""
+    return _N['combat']['rocket_ranges'].get(rocket, _N['combat']['rocket_range'])
 
 
 def item_cooldown(loot):
@@ -231,6 +236,17 @@ def launcher_upgrade(p):
     import upgrades as UPG
     eq, lv = p.d.get('equipment', {}).get('rocket', []), p.d.get('equipment_level', {}).get('rocket', [])
     return max([UPG.factor(l, lv[i] if i < len(lv) else 0, UPG.ROCKET) for i, l in enumerate(eq) if l in LAUNCHERS] or [1.0])
+
+
+BLACKLIGHT_MAPS = {306, 307, 308, 460, 461, 462, 463, 464, 465}      # BL-1..3 and the Eternal Black Light rooms (ebl.py)
+
+
+def blacklight(p, map_id):
+    """The launcher's multiplier against Blacklight aliens (Erebus x5, client 1.1.119 text): the aliens of Blacklight Space, i.e. of the BL
+    maps and Eternal Black Light; with several launchers the highest."""
+    if int(map_id or 0) not in BLACKLIGHT_MAPS:
+        return 1.0
+    return max([LAUNCHERS[l].get('blacklight_multiplier', 1.0) for l in launchers(p)] or [1.0])
 
 
 def capacity(p):
@@ -1158,7 +1174,7 @@ class Items:
         nx, ny = asset if asset else n.mover.pos(now)
         rng = S['launcher']['range']
         if math.hypot(nx - hx, ny - hy) > rng:
-            self.send([('AttackRangeExceededCommand', {'uid': uid, 'maxRange': rng, 'type': 0})])
+            self.send([('AttackRangeExceededCommand', {'uid': uid, 'maxRange': rng, 'type': 2})])     # the client's HELLSTORM marker
             return
         w.end_invuln(force=True)
         w.abilities.reveal()
@@ -1189,7 +1205,7 @@ class Items:
         dmg = sum(cfg.get('damage', 0) * random.uniform(0.85, 1.0) for _ in range(cnt))
         fusion = SKL.mods(p).get('rocket', 0)                  # Rocket Fusion does not boost Hellstorm (fandom Rocket launcher)
         dmg = int(dmg * (1 + mods.get('rocket', 0) - fusion + (mods.get('npc', 0) if n else 0) + mods.get('launcher_damage', 0))     # Rapid Fire Plus +%20
-                  * (1 + p.lab_bonus(1)) * launcher_upgrade(p))
+                  * (1 + p.lab_bonus(1)) * launcher_upgrade(p) * (blacklight(p, w.map_id) if n else 1.0))
         drain = cfg.get('shield_drain', 0) * cnt
         impact = w.hit_asset if asset else w.hit_npc
         kw = {} if asset else {'ammo': ammo}            # Referee-Bot takes damage only from CBR (world.hit_npc)
@@ -1372,7 +1388,12 @@ class Items:
             self.log('   jump CPU strayed to the Cubikon Graveyard')
         if w.on_jump:
             self.send([stm('msg_cpu_jump_sequence_complete')])     # "CPU jump completed. Map switched." (forum 127075)
-            w.on_jump(dest, None, pos)
+            try:
+                w.on_jump(dest, None, pos)
+            except Exception:                    # the map change failed before this world stopped: not 'jumping' for good (world.jump_done)
+                if not w.stopped:
+                    w.jumping = False
+                raise
 
     def pay_ajp(self, dest):
         p, c = self.p, S['advanced_jump']

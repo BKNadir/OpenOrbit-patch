@@ -8455,12 +8455,6 @@
     "part": 0,
     "chance": [
      {
-      "item": "drone_designs_spartan",
-      "count": 1,
-      "probability": 0.25,
-      "first_guaranteed": true
-     },
-     {
       "item": "ship_g-saturn",
       "count": 1,
       "probability": 0.25
@@ -10311,7 +10305,6 @@
   450
  ],
  "portal_distance": 2200,
- "bonus_box_energy": 1,
  "schism": {
   "alpha": [
    5,

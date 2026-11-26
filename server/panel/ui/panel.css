@@ -132,8 +132,8 @@ a { color: var(--accent); }
   margin-top: auto; padding: 12px 12px 10px; display: grid; gap: 7px; font-size: 12.5px; position: relative;
   border: 1px solid var(--line); border-radius: var(--radius); background: rgba(5, 10, 20, .6);
 }
-.side-status::before {       /* telemetry heading */
-  content: "TELEMETRY"; position: absolute; top: -7px; left: 10px; padding: 0 6px; background: #070d1a;
+.side-status::before {       /* status heading (the text in the panel's language: applyStatic sets data-label) */
+  content: attr(data-label); text-transform: uppercase; position: absolute; top: -7px; left: 10px; padding: 0 6px; background: #070d1a;
   font: 600 9.5px/14px var(--display); letter-spacing: .22em; color: var(--dim);
 }
 .side-status .row { display: flex; align-items: center; justify-content: space-between; color: var(--muted); }
@@ -202,8 +202,6 @@ body[data-page=panel] .topbar { --hdr: url(images/hdr_panel.webp); }
 .grid { display: grid; gap: 16px; }
 .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.gauto { grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
-.gauto.saves { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }   /* so the save card's two-column info fits */
 .stack { display: grid; gap: 16px; }
 .stack > *, .grid > * { min-width: 0; }      /* long paths (client folder) should not overflow the card */
 .row { display: flex; align-items: center; gap: 10px; }
@@ -425,6 +423,19 @@ input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rg
 .prep-stage.running { color: var(--accent); }
 .prep-stage .dot-sm { width: 6px; height: 6px; border-radius: 50%; background: var(--line-2); }
 @media (prefers-reduced-motion: reduce) { .prep .meter-bar span, .play-btn::after, .dot.err { animation: none; } }
+/* readiness line (client, plugin, game images) and the hints that start "Prepare the game images" */
+.ready-card { display: grid; gap: 8px; }
+.ready-item { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.ready-item svg { width: 15px; height: 15px; flex: none; }
+.ready-item.ok svg { color: var(--ok); } .ready-item.miss { color: var(--text); } .ready-item.miss svg { color: var(--err); }
+.images-hint { gap: 10px; margin-bottom: 10px; } .images-hint .desc { margin: 0; }
+/* live card: slow loop and its history */
+.kv b.warn { color: var(--warn); }
+.kv .loop-row { align-items: center; }
+.loop-spark { width: 160px; height: 26px; flex: none; overflow: visible; }
+.loop-spark .avg { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.loop-spark .lim { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: .7; }
+.loop-row.warn .loop-spark .avg { stroke: var(--warn); }
 .spin { width: 14px; height: 14px; border: 2px solid rgba(64, 223, 255, .22); border-top-color: var(--accent); border-radius: 50%;
   animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -668,7 +679,6 @@ button.chip:hover { border-color: var(--accent); color: #fff; box-shadow: 0 0 10
 .menu button:disabled { opacity: .45; cursor: not-allowed; }
 .menu button.danger { color: #ff8b96; } .menu button.danger svg { color: #ff8b96; }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
-.kbd { font: 11px var(--mono); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--line-2); background: rgba(4, 9, 18, .8); color: var(--muted); }
 
 /* ---------------------------------------------------------------- setup wizard (first run) */
 .wizard { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; overflow: auto; animation: fade .2s ease-out;

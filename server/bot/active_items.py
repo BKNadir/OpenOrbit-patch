@@ -11,7 +11,7 @@
   AIM CPU          10 Xenomit per shot: miss rate 25% / 50% lower
 All of them depend on the bot's permissions (technology, extra, mine) and its stock; cooldowns are the player's values.
 """
-import math, random, time
+import math, random
 
 from legacy_protocol import legacy
 from . import catalog as K
@@ -163,21 +163,26 @@ def smart_bomb(w, n, now, enemies):
 
 
 def emp(w, n, now):
-    """The selection of the player locked on it drops; aliens targeting the bot get confused."""
+    """The selection of the player locked on it drops, the enemy bot ships firing at it lose it too (they cannot select it again for
+    daze_sec: ship.can_attack_bot); aliens targeting the bot get confused. Only when someone (the player or a bot) has it locked."""
     from . import weapons as WP
     c = CIT['emp']
     b = n.bot
     x, y = n.mover.pos(now)
-    if WP.stock(b).get(EMP, 0) <= 0 or not ready(n, 'emp', now) or w.in_pvp_peace(x, y, b.company) or w.target != n.id:
+    locked = [m for m in w.npcs.values() if m.bot is not None and m.alive and m.target == n.id and m.bot.company != b.company]
+    if WP.stock(b).get(EMP, 0) <= 0 or not ready(n, 'emp', now) or w.in_pvp_peace(x, y, b.company) or (w.target != n.id and not locked):
         return False
     WP.spend(b, EMP, 1)
     wait(n, 'emp', now, c['cooldown_sec'])
     _broadcast(w, [legacy('0|n|EMP|%d' % n.id)], n.id)
-    if w.attacking:
-        w.laser_stop()                     # the client's laser and red target highlight go away too
-    w.target, w.attacking = None, False
-    w.send([('ShipDeselectionCommand', {})])
+    if w.target == n.id:
+        if w.attacking:
+            w.laser_stop()                 # the client's laser and red target highlight go away too
+        w.target, w.attacking = None, False
+        w.send([('ShipDeselectionCommand', {})])
     n.emp_lock = now + c['daze_sec']      # cannot be reselected for that time (world.select; player report 2026-10-31: it was selected immediately)
+    for m in locked:
+        m.target = None
     for m in w.npcs.values():
         if m.bot is None and m.bot_target == n.id:
             m.bot_target = None
@@ -230,6 +235,10 @@ def combat(w, n, now, d, ratio, attackers):
         changed |= insta_shield(w, n, now)
     if attackers and ratio < 0.4:
         changed |= backup_shields(w, n, now) or battle_repair(w, n, now, d['hp'])
+    # EMP: focused by several ships (or badly hurt under PvP fire) it drops their locks; alone against one it is kept for the escape
+    # (flee). Before, EMP fired only while fleeing, and a team mode's map has no fleeing: it was never used in a match
+    if len(player_or_bot) >= 2 or (player_or_bot and ratio < 0.35 and BG.is_gate_world(w)):
+        emp(w, n, now)
     # PvP: someone is attacking it or it is attacking a player / bot (also when attacking a player who does not fight back: it used to start
     # only when hit, so slowing rockets were never fired; live 2026-11-01)
     pvp_target = n.target is not None and ((n.target in w.npcs and w.npcs[n.target].bot is not None) or BG._player(w, n.target) is not None)
@@ -263,11 +272,12 @@ def slow_down(w, n, o, ratio, now):
         return False
     x, y = n.mover.pos(now)
     hx, hy = o.hero_pos(now)
-    if math.hypot(hx - x, hy - y) > BG.LASER_RANGE or o.hero_effects.d.keys() & {'slow', 'frozen'}:
+    if o.hero_effects.d.keys() & {'slow', 'frozen'}:
         return False
+    import combat_items as CI
     for loot in ((RIC,) if ratio < 0.35 else ()) + ((DCR,) if ratio < 0.6 or b.o('aggression') > 0.5 else ()):
         r = K.ITEMS['rockets'][loot]
-        if WP.stock(b).get(loot, 0) > 0 and ready(n, loot, now):
+        if WP.stock(b).get(loot, 0) > 0 and ready(n, loot, now) and math.hypot(hx - x, hy - y) <= CI.rocket_range(loot):
             (kind, (val, sec)), = r['effect'].items()
             WP.spend(b, loot, 1)
             wait(n, loot, now, r['cooldown_sec'])

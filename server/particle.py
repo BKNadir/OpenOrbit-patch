@@ -23,12 +23,13 @@ The breakers' and lenses' defense is against player weapons (with bot players, S
 """
 import json, math, os, random, time
 
+import game_data as DATA
 import settings as SET
 import inventory as INV
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 D = json.load(open(os.path.join(HERE, 'data', 'particle.json'), encoding='utf8'))
-ITEMS = json.load(open(os.path.join(HERE, 'data', 'client_items.json'), encoding='utf8'))['items']
+ITEMS = DATA.shared('client_items.json')['items']
 CANNONS, SHIELDS, DRIVES, LENSES = D['cannons'], D['breakers'], D['drives'], D['lenses']
 SLUGS, GSP = D['slugs'], D['gsp']
 C, DR = D['cannon_common'], D['drive_common']
@@ -164,7 +165,9 @@ def hangar_fields(p, iid, loot):
     st = ensure(p, iid) or {}
     f = {'modifiers': modifiers_str(p, iid), 'star': st.get('star', 0)}
     if loot in CANNONS:
-        f['extAttributes'] = [mod('TupleTwoModule', param0='baseDamage', param1=str(int(base_damage(p, iid))))]
+        # The tooltip adds this percentage to the client's own base damage.
+        percent = round(100 * (C['star'][f['star']] - 1))
+        f['extAttributes'] = [mod('TupleTwoModule', param0='baseDamage', param1=str(percent))]
         if CANNONS[loot]['ship']:
             import ship_module as GM                           # the tooltip's ship by numeric id (ReturnShips)
             f['ships'] = GM.ship_ids([CANNONS[loot]['ship']])
@@ -562,27 +565,33 @@ class Shot:
         return True
 
     def resonate(self, z, now):
-        """Attributes of the best Strike Resonator (resonator.py, Ö6): radius, duration, total damage, aftershock, slowdown,
-        following the main target. Damage is per second: the total damage (duration x per-second) is kept with the multiplier."""
+        """The active config's Strike Resonator (resonator.py, client 1.1.119): +level damage (2..14%) and the ship bonus on the total, then
+        its special attribute (FAQ 130532 / the client's texts): Expansion radius +x; Collapse duration -10%, total +x; Evernight duration
+        +50%, total +x; Aftershock total +x, 75% over the field and 25% exploding at the end with +50% radius; Stagnation slows those
+        inside by x; Adhesion follows the main target for the whole duration at x less damage. Damage is per second: the total
+        (duration x per-second) carries the multipliers."""
         import resonator as RS
         a = RS.strike_mods(self.p)
         if not a:
             return z
-        duration, total = float(DR['duration_sec']), 1.0
+        duration, total = float(DR['duration_sec']), 1 + (a.get('damage', 0) + a.get('ship', 0)) / 100.0
         if 'collapse' in a:
-            duration, total = duration * 0.75, total * (1 + a['collapse'] / 100.0)
+            duration, total = duration * 0.9, total * (1 + a['collapse'] / 100.0)
         elif 'evernight' in a:
-            duration, total = duration * 1.25, total * (1 + a['evernight'] / 100.0)
+            duration, total = duration * 1.5, total * (1 + a['evernight'] / 100.0)
+        elif 'aftershock' in a:
+            total *= 1 + a['aftershock'] / 100.0
         per = z['damage'] * total * DR['duration_sec'] / duration
         z.update(end_time=now + duration, damage=per, area=z['area'] * (1 + a.get('expansion', 0) / 100.0), resonator=a)
-        if 'aftershock' in a:                       # 75% over the field's duration, 25% at the end (radius +x)
+        if 'aftershock' in a:                       # 75% over the field's duration, 25% at the end (radius +50%)
             z['aftershock_dmg'] = per * 0.25 * duration
             z['damage'] = per * 0.75
-            z['aftershock_area'] = z['area'] * (1 + a['aftershock'] / 100.0)
+            z['aftershock_area'] = z['area'] * 1.5
         if 'stagnation' in a:
             z['slow'] = a['stagnation'] / 100.0
         if 'adhesion' in a:
-            z['follow'] = now + min(a['adhesion'], duration)
+            z['follow'] = now + duration
+            z['damage'] = z['damage'] * (1 - a['adhesion'] / 100.0)
         return z
 
     def zone_tick(self, z, now):
@@ -623,13 +632,14 @@ class Shot:
                     continue
                 if now >= z['end_time']:
                     self.zones.remove(z)
+                    # The client can cancel an effect by unit ID after that unit was removed. Before the explosion: a kill in it can stop
+                    # the world (the last alien of a gate), and a stopped world sends nothing more
+                    self.w.send([self.zone_end(z)])
                     if z.get('aftershock_dmg'):                                  # Aftershock: the remaining 25% explodes at the end
                         for m in self.others(z['x'], z['y'], z['aftershock_area'], set(), now):
                             if self.w.hero_dead or self.zones is not zones:
                                 break
                             self.w.hit_npc(m.id, int(z['aftershock_dmg']), DRIVE_ATTACK)
-                    # The client can cancel an effect by unit ID after that unit was removed.
-                    self.w.send([self.zone_end(z)])
                 else:
                     self.zone_tick(z, now)
         for uid, k in list(self.corrosive.items()):

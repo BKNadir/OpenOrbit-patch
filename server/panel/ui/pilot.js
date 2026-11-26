@@ -81,6 +81,7 @@ const PIL_STOP = {
   players: N('Enemy pilot nearby.'), gate_done: N('Galaxy gate completed.'), gate_not_built: N('The galaxy gate is not built.'),
   gate_lives: N('No life left for the galaxy gate.'), gate_lives_low: N("The gate's lives fell to the limit set: the gate is kept for later."), gate_no_route: N('No route to the galaxy gate.'), gate_none: N('No galaxy gate chosen.'),
   no_quest: N('No quest to play.'), quest_done: N('The chosen quest is done.'), quest_gone: N('The chosen quest is no longer accepted.'),
+  no_repair: N('Low HP and no repair robot.'),
 };
 // the journal's lines: the server sends the English template and its values (server/pilot, Pilot.note); each one is listed here so the
 // panel's languages carry it (test_pilot checks that every server template is here)
@@ -96,7 +97,10 @@ const PIL_NOTES = [N('Started in {0} mode.'), N('Stopped.'), N('Stopped: {0}'), 
   N('No route to {0}: staying here.'), N('Flying to {0}.'), N('Nothing left to do here: on to {0}.'),
   N('{0}: {1}/{2} parts ({3} U spent on spins).'), N('Shield low ({0} %): SAB-50 on the shielded aliens.'), N('Shield back to {0} %: normal ammo.'),
   N("{0} is inside an immobile alien\'s zone: drawing it out."), N('{0} did not follow: out of the zone, another try.'),
-  N("{0} does not leave the immobile alien\'s zone: left alone for a while."), N("{0} is inside an immobile alien\'s zone: HP too low to draw it out.")];
+  N("{0} does not leave the immobile alien\'s zone: left alone for a while."), N("{0} is inside an immobile alien\'s zone: HP too low to draw it out."),
+  N('Cargo full and selling is off: quest step set aside.'), N('Skylab upgrade not possible (budget, credits or resources): quest step set aside.'),
+  N('Laboratory upgrade not possible (the part is full): quest step set aside.'), N('Quest step made no progress for {0} minutes: set aside.'),
+  N('Quest step set aside: {0}')];
 const PIL_QKIND = { q_kill: N('aliens to destroy'), q_visit: N('a map to visit'), q_giver: N('back to the quest giver'),
   q_point: N('a point to reach'), q_travel: N('a distance to fly'), q_stay: N('time to spend on a map'), q_boxes: N('bonus boxes to collect'),
   q_ore: N('ore to collect'), q_grind: N('any aliens to destroy'), q_gate: N('a galaxy gate'), q_pvp: N('enemy pilots'),
@@ -124,9 +128,13 @@ async function renderPilot() {
   pilMapStop();
   await loadGameImages();
   await pilSavesLoad(true);
+  if (S.page !== 'pilot') return;                 // another page was opened meanwhile: drawing here would cover it (and poll for nothing)
   if (!PIL.slot) PIL.slot = pilMem('slot');
   if (!PIL.saves.some(k => k.id === PIL.slot)) PIL.slot = (PIL.saves.find(k => k.active) || PIL.saves[0] || {}).id || null;
-  try { PIL.data = await pilApi('/api/pilot'); } catch (e) { return gameError(e, 'pilot'); }
+  let d;
+  try { d = await pilApi('/api/pilot'); } catch (e) { return S.page === 'pilot' && gameError(e, 'pilot'); }
+  if (S.page !== 'pilot') return;
+  PIL.data = d;
   if (!PIL.data.online) {                               // this save's pilot is not in the game: the strip (its switch) and the other In-game pages' text
     const saves = pilSavesStrip(), cur = PIL.saves.find(k => k.id === PIL.slot);
     $('#content').replaceChildren(h('div', { class: 'stack' }, saves, h('div', { class: 'card' }, h('div', { class: 'empty' },
@@ -1189,6 +1197,7 @@ PILC.push({ id: 'quests', tab: 'mode:quest', order: 10, build: () => {
     chosen ? h('p', { class: 'muted small' }, T('Only this quest is played; no other quest is taken.'))
       : pilCheck('quests.accept', T('Take a new quest at a quest giver when none can be played (lowest level first, then up)')),
     chosen ? null : pilFields(field(T('Quests to take at once'), pilNum('quests.accept_count', 1, 20))),
+    pilCheck('ore.sell', T('Sell the cargo at the base when it is full, then come back')),     // the Ore card's (Hunt); off: only a sale quest's ore is sold
     h('p', { class: 'desc', style: { marginTop: '12px' } }, chosen ? T('When this quest is done or cannot be played:') : T('When no quest can be played nor taken:')),
     pilThen('quests', 'quest'));
 } });

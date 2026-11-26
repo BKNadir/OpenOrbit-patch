@@ -10,7 +10,7 @@ Adaptation (data/extra_events.json "_adaptation"): the ball heads for the portal
 10 seconds, faster the bigger its lead (speed 1-3); the bot pilots on 4-4 shoot it too; one box per prize; the day's winner is the company
 with the most goals (a tie: nobody); the model by season (summer 442, winter 443, football 444).
 """
-import collections, math, random, time
+import collections, datetime, math, time
 
 import event_calendar as CAL
 import game_data as DATA
@@ -24,8 +24,19 @@ NAMES = {1: 'MMO', 2: 'EIC', 3: 'VRU'}
 X5 = {1: 17, 2: 21, 3: 25}                        # the companies' X-5 (1-5, 2-5, 3-5): their portals on 4-4 are the goals
 
 
+def space_cup(now=None):
+    """Space Football (wiki events/spacecup): the Spaceball during Space Cup (data 'mayhem')."""
+    mh = D.get('mayhem')
+    return bool(mh) and CAL.is_active(mh['event'], now)
+
+
 def active(now=None):
-    return bool(D) and CAL.is_active(EVENT, now)
+    return bool(D) and CAL.is_active(EVENT, now)      # also during Space Cup: events.json spacecup counts_as spaceball
+
+
+def pvp_factor(map_id, now=None):
+    """Space Football's Extra PvP Bonus: a PvP kill on 4-4 during the match gives double rewards (player_combat.on_kill)."""
+    return D['mayhem'].get('pvp_factor', 1) if D and int(map_id) == D['map'] and space_cup(now) else 1
 
 
 def day(now=None):
@@ -44,7 +55,8 @@ def roll_day(p, company, now=None):
     today = day(now)
     if st.get('day') == today:
         return False
-    if st.get('day'):
+    yesterday = (datetime.date.fromisoformat(today) - datetime.timedelta(days=1)).isoformat()
+    if st.get('day') == yesterday:                # an older day's lead (last on 4-4 days ago) gives no bonus today
         sc = st['scores']
         top = max(sc.values())
         leaders = [c for c, v in sc.items() if v == top]
@@ -64,6 +76,8 @@ def company_mods(p):
 
 
 def model(now=None):
+    if space_cup(now):
+        return D['mayhem']['model']                  # Space Football: the football look
     m = time.localtime(now or time.time()).tm_mon
     return '444' if m in (6, 7) else '443' if m in (11, 12, 1, 2) else '442'
 
@@ -87,6 +101,7 @@ class Spaceball:
         self.owner, self.speed = 0, 0
         self.next_step = 0.0
         self.goal_at = {}
+        self.player_hit = 0.0                # the player's last hit on the ball (Mayhem boxes)
 
     def company(self):
         return int(self.p.d['pilot'].get('factionId') or 1)
@@ -107,13 +122,21 @@ class Spaceball:
         self.ball = None
         self.hits.clear()
         self.owner, self.speed = 0, 0
+        if D and int(world.map_id) == D['map'] and not active():
+            world.later(1.0, lambda: self.purge(world))       # a ball the map's saved state brought back after the event
         if not active() or int(world.map_id) != D['map']:
             return []
         roll_day(self.p, self.company())
         self.goal_at = goals(world.map_id)
         x, y = D.get('start') or (world.map_w // 2, world.map_h // 2)
         world.later(1.0, lambda: self.spawn(world, x, y))
+        self.next_step = time.time() + 1.5                    # the tick does not place it first (it would, the event running without a ball)
         return [self.init_cmd()]
+
+    def purge(self, w):
+        with w.lock:
+            for m in [m for m in w.npcs.values() if m.tip == D['npc']]:
+                w.send(w.remove_npc(m))
 
     def spawn(self, w, x, y):
         if w is not self.world:
@@ -123,7 +146,7 @@ class Spaceball:
             n = next((m for m in w.npcs.values() if m.tip == D['npc'] and m.alive), None) or w.spawn_npc_at(D['npc'], x, y, model=model())
             for m in [m for m in w.npcs.values() if m.tip == D['npc'] and m is not n]:
                 w.send(w.remove_npc(m))
-        n.damage_hook = lambda dmg: self.hit(self.company(), dmg)      # the player's (and the P.E.T.'s) hits
+        n.damage_hook = self.player_hits                                 # the player's (and the P.E.T.'s) hits
         n.company_damage = self.hit                                      # a bot pilot's hits (bot/ship.hit_npc)
         self.ball = n
         self.log('   Spaceball: the ball on %s' % H.name(w.map_id))
@@ -131,6 +154,11 @@ class Spaceball:
     def hit(self, company, dmg):
         if dmg > 0:
             self.hits.append((time.time(), int(company), int(dmg)))
+
+    def player_hits(self, dmg):
+        if dmg > 0:
+            self.player_hit = time.time()
+        self.hit(self.company(), dmg)
 
     def lead(self, now):
         """The company the ball heads for and its speed (1-3) from the damage of the last seconds."""
@@ -147,12 +175,24 @@ class Spaceball:
 
     def tick(self, now):
         w, n = self.world, self.ball
+        if w is not None and n is None and now >= self.next_step and D and int(w.map_id) == D['map'] and active(now):
+            self.next_step = now + 1.0                        # the event began while the pilot is on 4-4: the ball and the window now
+            roll_day(self.p, self.company())
+            self.goal_at = goals(w.map_id)
+            self.owner, self.speed = 0, 0
+            self.spawn(w, *(D.get('start') or (w.map_w // 2, w.map_h // 2)))
+            return [self.init_cmd()]
         if w is None or n is None or now < self.next_step:
             return []
         self.next_step = now + 1.0
         if not n.alive or n.id not in w.npcs:
             self.ball = None
             return []
+        if not active(now):                            # the event ended while on 4-4: the ball goes (no more goals and prize boxes)
+            self.ball = None
+            with w.lock:
+                gone = w.remove_npc(n)
+            return gone + [('SpaceBallUpdateSpeedCommand', dict(factionId=0, speed=0))]
         n.hp, n.shield = n.d['hp'], n.d['shield']         # the ball cannot be destroyed
         msgs = []
         owner, speed = self.lead(now)
@@ -172,18 +212,14 @@ class Spaceball:
         return msgs
 
     def bots(self, w, n, now):
-        """The bot pilots near the ball shoot it now and then (they push it to their own portal: the most damage leads it)."""
-        bx, by = n.mover.pos(now)
-        for b in list(w.npcs.values()):
-            if b.bot is None or not b.alive or b.target is not None and b.target != n.id:
-                continue
-            x, y = b.mover.pos(now)
-            if math.hypot(x - bx, y - by) <= D['bot_range'] and random.random() < D['bot_chance']:
-                b.target = n.id
+        """The bot pilots on 4-4 and the ball: bot/tactics.py."""
+        from bot import tactics as TT
+        return TT.spaceball_bots(self, w, n, now)
 
     def goal(self, company, gx, gy, gid):
         """A goal: the company's score, the announcement, the cargo boxes at its portal, the ball back to the middle."""
         w, n = self.world, self.ball
+        roll_day(self.p, self.company())                # on 4-4 past midnight: the goal counts for the new day
         st = state(self.p)
         st['scores'][str(company)] = st['scores'].get(str(company), 0) + 1
         self.p.dirty = True
@@ -191,6 +227,13 @@ class Spaceball:
             a = 2 * math.pi * i / len(D['prizes'])
             h = w.drop_box(D['box'], int(gx + math.cos(a) * 250), int(gy + math.sin(a) * 250), None, D['box_life_sec'])
             w.boxes[h]['event'] = {'contents': [[loot, amount]], 'mod': 'all'}
+        mh = D.get('mayhem')
+        if space_cup() and company == self.company() and time.time() - self.player_hit <= D['window_sec']:
+            for i in range(mh['count']):                 # Space Football: Mayhem boxes for the scorers (one item each, no countdown)
+                a = 2 * math.pi * (i + 0.5) / mh['count']
+                h = w.drop_box(mh['box'], int(gx + math.cos(a) * mh['radius']), int(gy + math.sin(a) * mh['radius']), None, mh['life_sec'],
+                               owner=w.hid)
+                w.boxes[h]['event'] = {'contents': mh['contents'], 'mod': 'one_of'}
         cx, cy = D.get('start') or (w.map_w // 2, w.map_h // 2)
         n.mover = type(n.mover)(cx, cy)
         self.hits.clear()
