@@ -191,7 +191,7 @@ const SE_RESET = [['hints', N('Show tips again (closed and already shown ones, e
   ['ui', N('Reset menu bars and window positions')], ['game_settings', N("Reset the game's Settings window (graphics, sound, gameplay)")],
   ['active_quests', N('Drop accepted missions (finished ones stay)')], ['history', N('Clear the logbook and account history')]];
 const SE_FIELD = { name: N('Pilot name'), company: N('Company'), level: N('Level'), ep: N('Experience (EP)'), credits: N('Credits'), uridium: N('Uridium'), honor: N('Honor'),
-  premium: 'Premium', active_ship: N('Active ship'), map: N('Map'), hp: N('Ship hit points') };
+  premium: 'Premium', active_ship: N('Active ship'), map: N('Map'), hp: N('Ship hit points'), stats: N('Statistics (parts changed)') };
 
 function seOpen(k) {
   Object.assign(SE, { slot: k.id, name: k.name, v: null, tab: 'pilot', ship: null, config: null });
@@ -1075,32 +1075,70 @@ function seMaintenance(v) {
 const SE_RENDER = { pilot: sePilot, hangar: seHangar, drones: seDrones, pet: sePet, inventory: seInventory, ammunition: seAmmo, sources: seResources,
   boosters: seBoosters, maintenance: seMaintenance, stats: seStats };
 
-// Statistics (read-only; save_editor.stats): rank points, kills, deaths, gates and their times, best results of the modes
+// Statistics (save_editor.stats; editable since 2026-11-26: save_editor.op_stats): rank points and their parts, kills, deaths, gates and
+// their times, best results of the modes. The values computed from elsewhere (EP, honor, level, alien and player points) are shown, their
+// sources are edited (the Pilot tab, the kill tables).
 const SE_POINTS = [['ExperiencePoints', N('Experience (EP)')], ['honorPoints', N('Honor')], ['yourLevel', N('Level')], ['npcShotPoints', N('Alien points')],
   ['playerShotPoints', N('Player points')], ['missionsCompleted', N('Quests finished')], ['daysSinceRegistration', N('Days since registration')],
   ['DestroyedByEnemies', N('Destroyed by enemies')], ['DestroyedByRadiationZone', N('Radiation deaths')], ['friendlyPlayersDestroyed', N('Friendly kills')]];
 const seDuration = sec => sec ? (sec >= 3600 ? Math.floor(sec / 3600) + ':' : '') + String(Math.floor(sec / 60) % 60).padStart(sec >= 3600 ? 2 : 1, '0') + ':' + String(sec % 60).padStart(2, '0') : '—';
-function seStats(v) {
-  const s = v.stats || {}, p = s.points || {};
-  const table = (titles, lines, empty) => lines.length ? h('div', { class: 'bt-table' }, h('table', { class: 'table' },
-    h('thead', null, h('tr', null, titles.map(x => h('th', null, x)))), h('tbody', null, lines)))
+// "1:02:03", "2:03" or seconds -> seconds (NaN when unreadable)
+const seParseDuration = t => { t = String(t).trim(); if (!t || t === '—') return 0;
+  const p = t.split(':').map(Number); if (p.some(x => !Number.isFinite(x) || x < 0)) return NaN; return p.reduce((a, x) => a * 60 + x, 0); };
+function seDurationBox(sec, update) {
+  return h('input', { class: 'input num', value: sec ? seDuration(sec) : '', placeholder: '—', disabled: SE.v.read_only, style: { width: '90px' },
+    onchange: e => { const n = seParseDuration(e.target.value); if (!Number.isFinite(n)) { e.target.value = sec ? seDuration(sec) : ''; return; }
+      if (Math.round(n) !== (sec || 0)) update(Math.round(n)); },
+    onkeydown: e => { if (e.key === 'Enter') e.target.blur(); } });
+}
+// a kill table: each kind's count editable (0 removes it), a picker adds a kind
+function seKillTable(rows, names, key, titles, empty, withPoints) {
+  const ro = SE.v.read_only, op = (k, n) => seApply({ operation: 'stats', [key]: { [k]: n } });
+  const have = new Set(rows.map(r => r[r.length - 1]));
+  const pick = h('select', { class: 'input', disabled: ro, style: { maxWidth: '260px' } },
+    h('option', { value: '' }, T('Add…')), names.filter(([k]) => !have.has(k)).map(([k, n]) => h('option', { value: k }, n)));
+  const add = h('div', { class: 'row', style: { gap: '8px', marginTop: '8px' } }, pick,
+    btn(T('Add'), () => pick.value && op(pick.value, 1), 'ghost', 'plus', { disabled: ro }));
+  const body = rows.length ? h('div', { class: 'bt-table' }, h('table', { class: 'table' },
+    h('thead', null, h('tr', null, titles.map(x => h('th', null, x)))),
+    h('tbody', null, rows.map(r => { const k = r[r.length - 1], n = r[1];
+      return h('tr', null, h('td', null, r[0]), h('td', { class: 'num' }, numberBox(n, x => op(k, x), { max: 1e9 })),
+        withPoints ? h('td', { class: 'num' }, fmtN(r[2] * n)) : null); }))))
     : h('div', { class: 'small muted' }, empty);
+  return h('div', null, body, add);
+}
+function seStats(v) {
+  const s = v.stats || {}, p = s.points || {}, ro = v.read_only;
+  const op = x => seApply(Object.assign({ operation: 'stats' }, x));
+  const num = (n, key, max = 1e9) => numberBox(n || 0, x => op({ [key]: x }), { max });
+  const line = (name, ctrl) => h('div', { class: 'row', style: { alignItems: 'center', gap: '8px' } }, h('span', { class: 'grow muted' }, name), ctrl);
+  const gateRow = k => h('tr', null, h('td', null, k.name),
+    h('td', { class: 'num' }, numberBox(k.done || 0, x => op({ gate: { key: k.key, done: x } }), { max: 1e6 })),
+    h('td', { class: 'num' }, seDurationBox(k.best, x => op({ gate: { key: k.key, best: x } }))),
+    h('td', { class: 'num' }, seDurationBox(k.last, x => op({ gate: { key: k.key, last: x } }))));
+  const listed = new Set((s.gates || []).map(k => k.key));
+  const gatePick = h('select', { class: 'input', disabled: ro, style: { maxWidth: '260px' } }, h('option', { value: '' }, T('Add…')),
+    (s.gate_names || []).filter(([k]) => !listed.has(k)).map(([k, n]) => h('option', { value: k }, n)));
   return h('div', { class: 'stack' },
     seCard(T('Rank points'), 'star', h('div', { class: 'row wrap', style: { gap: '8px', marginBottom: '8px' } },
-      badge(T('Rank points') + ': ' + fmtN(p.rankPoints || 0), 'info'), badge(T('Time played') + ': ' + fmtDur(s.play_sec || 0), '')),
-      h('div', { class: 'se-stats' }, SE_POINTS.map(([k, name]) => h('div', { class: 'row' }, h('span', { class: 'grow muted' }, T(name)), h('b', null, fmtN(p[k] || 0)))))),
-    seCard(T('Gates'), 'globe', table([T('Gate'), T('Completions'), T('Best time'), T('Last time')],
-      (s.gates || []).map(k => h('tr', null, h('td', null, k.name), h('td', { class: 'num' }, fmtN(k.done)), h('td', { class: 'num' }, seDuration(k.best)), h('td', { class: 'num' }, seDuration(k.last)))),
-      T('No gates completed yet.')),
-      h('div', { class: 'small muted', style: { marginTop: '6px' } }, T('Time runs from entering the first wave to completion; gates finished before this version have no time.'))),
-    seCard(T('Destroyed aliens'), 'zap', table([T('Aliens'), T('Count'), T('Points')],
-      (s.npc || []).map(([name, n, pts]) => h('tr', null, h('td', null, name), h('td', { class: 'num' }, fmtN(n)), h('td', { class: 'num' }, fmtN(pts * n)))), T('No aliens destroyed yet.'))),
-    seCard(T('Players and deaths'), 'shield', h('div', { class: 'se-stats' },
-      [[T('Destroyed by enemies'), (s.death || {}).enemy], [T('Radiation deaths'), (s.death || {}).radiation], [T('Other deaths'), (s.death || {}).other],
-       [T('Friendly kills'), s.friendly], [T('Quests finished'), s.quest], [T('Eternal Black Light best wave'), (s.modes || {}).ebl],
-       [T('Frozen Labyrinth hunts'), (s.modes || {}).labyrinth], [T('Mimesis best run'), (s.modes || {}).mimesis]]
-        .map(([name, n]) => h('div', { class: 'row' }, h('span', { class: 'grow muted' }, name), h('b', null, fmtN(n || 0))))),
-      table([T('Ship'), T('Killed')], (s.player || []).map(([name, n]) => h('tr', null, h('td', null, name), h('td', { class: 'num' }, fmtN(n)))), T('No players destroyed yet.'))));
+      badge(T('Rank points') + ': ' + fmtN(p.rankPoints || 0), 'info')),
+      h('div', { class: 'se-stats' }, SE_POINTS.map(([k, name]) => h('div', { class: 'row' }, h('span', { class: 'grow muted' }, T(name)), h('b', null, fmtN(p[k] || 0))))),
+      h('div', { class: 'small muted', style: { marginTop: '6px' } }, T('EP, honor and level are edited in the Pilot tab; alien and player points come from the kill tables below.'))),
+    seCard(T('Account'), 'info', h('div', { class: 'stack', style: { gap: '6px' } },
+      line(T('Days since registration'), num(p.daysSinceRegistration, 'days', 36500)),
+      line(T('Time played') + ' (' + T('hours') + ')', numberBox(Math.floor((s.play_sec || 0) / 3600), x => op({ play_sec: x * 3600 + (s.play_sec || 0) % 3600 }), { max: 1e6 })))),
+    seCard(T('Gates'), 'globe', (s.gates || []).length ? h('div', { class: 'bt-table' }, h('table', { class: 'table' },
+      h('thead', null, h('tr', null, [T('Gate'), T('Completions'), T('Best time'), T('Last time')].map(x => h('th', null, x)))),
+      h('tbody', null, (s.gates || []).map(gateRow)))) : h('div', { class: 'small muted' }, T('No gates completed yet.')),
+      h('div', { class: 'row', style: { gap: '8px', marginTop: '8px' } }, gatePick, btn(T('Add'), () => gatePick.value && op({ gate: { key: gatePick.value, done: 1 } }), 'ghost', 'plus', { disabled: ro })),
+      h('div', { class: 'small muted', style: { marginTop: '6px' } }, T('Time runs from entering the first wave to completion; gates finished before this version have no time.') + ' ' + T('Times are written as h:mm:ss or m:ss.'))),
+    seCard(T('Destroyed aliens'), 'zap', seKillTable(s.npc || [], s.npc_names || [], 'npc', [T('Aliens'), T('Count'), T('Points')], T('No aliens destroyed yet.'), true)),
+    seCard(T('Players and deaths'), 'shield', h('div', { class: 'stack', style: { gap: '6px' } },
+      line(T('Destroyed by enemies'), num((s.death || {}).enemy, 'death_by_enemy')), line(T('Radiation deaths'), num((s.death || {}).radiation, 'death_by_radiation')),
+      line(T('Other deaths'), num((s.death || {}).other, 'death_other')), line(T('Friendly kills'), num(s.friendly, 'friendly')),
+      line(T('Quests finished'), num(s.quest, 'quest')), line(T('Eternal Black Light best wave'), num((s.modes || {}).ebl, 'ebl', 1e6)),
+      line(T('Frozen Labyrinth hunts'), num((s.modes || {}).labyrinth, 'labyrinth', 1e6)), line(T('Mimesis best run'), num((s.modes || {}).mimesis, 'mimesis'))),
+      h('div', { style: { marginTop: '10px' } }, seKillTable(s.player || [], s.ship_names || [], 'player', [T('Ship'), T('Killed')], T('No players destroyed yet.'), false))));
 }
 
 // ---- summary of changes, save, discard
