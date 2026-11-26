@@ -108,7 +108,27 @@ def read(pid):
     d = _read_file(_route(pid))
     if d is None:
         raise BotError(_('Bot pack not found.'))
+    if _new_classes(d):
+        _save(pid, d)
     return d
+
+
+def _new_classes(d):
+    """A pack made before the pirate (5-X) and Black Light (BL) classes: they get their default count, and a Simple mode roster grows to fill
+    the new places -> whether the pack changed."""
+    sm = (d.get('settings') or {}).get('simple_maps')
+    if not isinstance(sm, dict):
+        return False
+    from bot import simple
+    missing = [s for s in SIMPLE_CLASSES if s not in sm]
+    if not missing:
+        return False
+    for s in missing:
+        sm[s] = simple.DEFAULT_MAPS.get(s, 0)
+    n = _count(d)
+    if n is not None and n > len(d.get('roster') or []):
+        d['roster'] = _resize(d, n)
+    return True
 
 
 def _save(pid, d):
@@ -177,7 +197,8 @@ def clean_settings(a, old=None):
     out['game_settings'] = {'profile': game_settings['profile'], 'values': value}
     bh = a.get('simple_maps', out.get('simple_maps'))
     if isinstance(bh, dict):
-        out['simple_maps'] = {s: max(0, min(20, int(bh.get(s, 0) or 0))) for s in SIMPLE_CLASSES}
+        from bot import simple
+        out['simple_maps'] = {s: max(0, min(20, int(bh.get(s, simple.DEFAULT_MAPS.get(s, 0)) or 0))) for s in SIMPLE_CLASSES}
     else:
         from bot import simple
         out['simple_maps'] = dict(simple.DEFAULT_MAPS)

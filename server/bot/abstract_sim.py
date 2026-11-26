@@ -87,7 +87,10 @@ def farm(bot, dt, y, target_kind=None):
     speed = y.speed(bot) if y is not None else 1.0
     d = bot.value()
     courage = max(0.0, min(1.0, 0.3 + 0.6 * bot.o('risk') + 0.2 * bot.mood['confidence'] - 0.3))
-    r = K.evaluate_map(bot.game_map, d['dps'], d['ehp'], courage)
+    from . import blacklight as BLK
+    n_team = BLK.team(bot, y)                    # a BL map: the company's bots there hunt as one team (blacklight.py)
+    boost = BLK.factor(bot.k['gear']) if int(bot.game_map) in BLK.BL_MAPS else 1.0      # Prometheus lasers against BL aliens
+    r = K.evaluate_map(bot.game_map, d['dps'] * boost * n_team, d['ehp'] * n_team, courage)
     if not r['targets']:
         if not WP.pick_laser(bot) and not WP.pick_rocket(bot):
             _collect_boxes(bot, dt, speed)        # also on a map with no alien suited to its power (otherwise an ammo-less bot never recovered there)
@@ -101,7 +104,7 @@ def farm(bot, dt, y, target_kind=None):
     from . import lab as LB
     ehp = d['ehp'] * (1 + 0.5 * LB.bonus(bot, LB.SHIELD))      # shield charge (the shield's share ~half)
     if abs(dps - d['dps']) > 1e-6 or ehp != d['ehp']:
-        r = K.evaluate_map(bot.game_map, dps, ehp, courage)
+        r = K.evaluate_map(bot.game_map, dps * boost * n_team, ehp * n_team, courage)
         if not r['targets']:
             return
     # efficiency: noisy (an impatient bot is uneven), low when tired
@@ -110,7 +113,7 @@ def farm(bot, dt, y, target_kind=None):
     efficiency *= 1 + 0.04 * EX.repair_level(bot)          # repair robot: less time to recover
     from . import playstyle as PL
     efficiency *= PL.combat_efficiency(bot)                  # skill (combat, focus), the day's form, habits
-    k = dt / 3600.0 * speed * efficiency
+    k = dt / 3600.0 * speed * efficiency / n_team            # a team's kills are shared out
     from . import palladium as PD
     palladium = not (y is not None and y.mode == 'simple') and PD.collecting(bot)     # simple mode: no trade trips
     if palladium:                                             # Palladium for free gate energy or a quest (part of the time: fewer kills);
